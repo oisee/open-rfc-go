@@ -30,7 +30,7 @@ git -C ../open-rfc log --oneline 847036d..origin/main -- src/protocol/ni.ts
 
 | open-rfc file | open-rfc commit | open-rfc-go file | Modifications |
 |---|---|---|---|
-| `docs/recurring-bug-class.md` | `847036d` | `docs/recurring-bug-class.md` | Verbatim, with an attribution header prepended. |
+| `docs/recurring-bug-class.md` | `847036d` | `docs/recurring-bug-class.md` | Verbatim prose, with an attribution header prepended and four relative links to `src/`/`test/` repointed at the upstream repository at that commit, since those paths do not exist here. |
 | `docs/architecture.md` | `847036d` | `docs/architecture.md` | Adapted: layer table rewritten for Go packages, Node-specific ladder steps replaced, evidence hierarchy kept unchanged. |
 | `DCO.md` | `847036d` | `DCO.md` | Verbatim (the document forbids modification). |
 | `LICENSE` | `847036d` | `LICENSE` | Verbatim Apache License 2.0. |

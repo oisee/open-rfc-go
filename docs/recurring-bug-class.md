@@ -2,7 +2,9 @@
 This document is a verbatim copy of docs/recurring-bug-class.md from open-rfc
 (https://github.com/marianfoo/open-rfc) at commit 847036d, Copyright 2026
 Marian Zeis, licensed under the Apache License, Version 2.0. Only this header
-was added. The file paths and code samples below refer to the TypeScript
+was added, and relative links to upstream source files were repointed at the
+upstream repository at that commit, since those paths do not exist here. The
+file paths and code samples below refer to the TypeScript
 implementation; the failure mode they describe applies unchanged to this port.
 -->
 
@@ -61,7 +63,7 @@ defect was a response parser pinning byte lengths on a hostname.
 Widening a length bound is not permission to accept malformed input. Look at
 what the fixed versions actually do:
 
-Read the length from the wire, then bound it — [`message-server.ts:416`](../src/protocol/message-server.ts):
+Read the length from the wire, then bound it — [`message-server.ts:416`](https://github.com/marianfoo/open-rfc/blob/847036d/src/protocol/message-server.ts):
 
 ```ts
 const hostLength = reader.readUInt16BE("hostLength");
@@ -72,7 +74,7 @@ if (hostLength < 1 || hostLength > RFC_GROUP_MAX_HOST_BYTES ||
 ```
 
 Bound *below* by the stable prefix you consume, ignore what a newer release
-appends, and still refuse a short row — [`classic-rfc.ts:564`](../src/protocol/classic-rfc.ts):
+appends, and still refuse a short row — [`classic-rfc.ts:564`](https://github.com/marianfoo/open-rfc/blob/847036d/src/protocol/classic-rfc.ts):
 
 ```ts
 if (value.byteLength < RFC_FUNINT_UNICODE_ROW_LENGTH) throw new RangeError(/* ... */);
@@ -84,7 +86,7 @@ A short row is still refused, deliberately: completing one with ABAP initial
 bytes would invent values the peer never sent.
 
 Constrain the derived value structurally instead of pinning one landscape's
-convention — [`message-server.ts:405`](../src/protocol/message-server.ts):
+convention — [`message-server.ts:405`](https://github.com/marianfoo/open-rfc/blob/847036d/src/protocol/message-server.ts):
 
 ```ts
 // 3200/3300 is the default block offset, not a protocol constant.
@@ -104,7 +106,7 @@ every length, every value, every ordering. Not one example.
 
 This single test shape would have caught four of the six on the day they were
 written. From
-[`test/xml-entity-reference.test.ts`](../test/xml-entity-reference.test.ts):
+[`test/xml-entity-reference.test.ts`](https://github.com/marianfoo/open-rfc/blob/847036d/test/xml-entity-reference.test.ts):
 
 ```ts
 // A character reference decodes the same at every padded width.
