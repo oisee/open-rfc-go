@@ -8,6 +8,7 @@
 | [Architecture](architecture.md) | Why the code is shaped this way; ownership invariants |
 | [Recurring bug class](recurring-bug-class.md) | The mistake to avoid — **required before touching a decoder** |
 | [Development](development.md) | How to build, test, fuzz, and run one test |
+| [Live test plan](live-test-plan.md) | You have a real SAP system and want to verify against it |
 | [Porting plan](porting-plan.md) | What is next, and why in that order |
 | [Provenance](provenance.md) | Which Go file came from which upstream file, and what changed |
 | [Surface inventories](surface/) | Cited signatures and constants for the unported layers |
@@ -25,6 +26,10 @@
 **"I want to port the next layer."**
 [Porting plan](porting-plan.md) → the relevant [surface inventory](surface/) →
 [cross-layer answers](surface/cross-layer-answers.md) → the upstream file itself
+
+**"I have an SAP system to test against."**
+[Live test plan](live-test-plan.md) -> [Cheat sheet](cheatsheet.md#authentication) for what auth
+is supported -> [Protocol primer](protocol-primer.md)
 
 **"I want to know if I can use this."**
 [`../README.md`](../README.md#status) → [`../SECURITY.md`](../SECURITY.md). Short

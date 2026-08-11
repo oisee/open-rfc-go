@@ -201,6 +201,7 @@ Start at [`docs/README.md`](docs/README.md), or go straight to what you need:
 | [Architecture](docs/architecture.md) | You are about to change the design |
 | [Recurring bug class](docs/recurring-bug-class.md) | You are about to write or change a decoder — **required** |
 | [Development](docs/development.md) | You are about to write code |
+| [Live test plan](docs/live-test-plan.md) | You have a real SAP system and want to verify against it |
 | [Porting plan](docs/porting-plan.md) | You want to know what is next and why in that order |
 | [Provenance](docs/provenance.md) | You want to know where a file came from |
 | [Surface inventories](docs/surface/) | You are porting a layer and want its signatures and constants |
