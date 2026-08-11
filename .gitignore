@@ -1,0 +1,8 @@
+# Go build and test output
+/bin/
+*.test
+*.out
+coverage.txt
+
+# Fuzz corpus entries found locally; committed only with a regression test
+testdata/fuzz/

@@ -1,0 +1,51 @@
+name: Development result
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  result:
+    name: Linux / Go 1.26
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # TODO: pin to a commit SHA before this repository is made public, the
+      # way the checkout action above is pinned. A tag is mutable.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.0'
+          check-latest: false
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "${unformatted}" ]; then
+            echo "gofmt reported unformatted files:"
+            echo "${unformatted}"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -race -shuffle=on ./...
+      # Decoders consume attacker-controlled bytes, so every pull request gets a
+      # short fuzz run. It is not a substitute for a scheduled longer one.
+      - name: Fuzz decoders briefly
+        run: |
+          go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
+          go test ./internal/ni -run TestX -fuzz FuzzFrameRoundTrip -fuzztime 60s

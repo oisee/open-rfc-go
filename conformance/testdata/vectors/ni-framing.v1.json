@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "layer": "ni",
+  "title": "NI record framing",
+  "rule": "An NI record is its payload prefixed with the payload length as four big-endian bytes. The prefix is peer-controlled and must be bounded before it is allocated against.",
+  "provenance": "Authored in open-rfc-go from the behaviour of open-rfc src/protocol/ni.ts and test/ni.test.ts at commit 847036d. See conformance/README.md for the intended move upstream.",
+  "encode": [
+    {
+      "name": "three-byte payload",
+      "payloadHex": "524643",
+      "frameHex": "00000003524643",
+      "why": "The canonical case, byte-identical to upstream test/ni.test.ts."
+    },
+    {
+      "name": "empty payload",
+      "payloadHex": "",
+      "frameHex": "00000000",
+      "why": "A zero-length record is a bare length prefix, not an error."
+    },
+    {
+      "name": "payload containing a length-prefix lookalike",
+      "payloadHex": "0000000352464300",
+      "frameHex": "000000080000000352464300",
+      "why": "Framing is length-driven, never content-driven: payload bytes that look like a header must not resynchronise the decoder."
+    }
+  ],
+  "decode": [
+    {
+      "name": "two records in one chunk",
+      "maxPayloadLength": 4096,
+      "chunksHex": ["000000056669727374000000067365636f6e64"],
+      "payloadsHex": ["6669727374", "7365636f6e64"],
+      "residualBytes": 0,
+      "why": "Coalesced records must both be delivered from a single read."
+    },
+    {
+      "name": "one record split across every byte boundary",
+      "maxPayloadLength": 4096,
+      "chunksHex": ["00", "00", "00", "03", "52", "46", "43"],
+      "payloadsHex": ["524643"],
+      "residualBytes": 0,
+      "why": "The length prefix itself may straddle reads; a decoder that assumes four contiguous bytes fails on a slow link."
+    },
+    {
+      "name": "record split mid-payload",
+      "maxPayloadLength": 4096,
+      "chunksHex": ["0000000552", "4643", "3132"],
+      "payloadsHex": ["5246433132"],
+      "residualBytes": 0,
+      "why": "Reads have no relationship to record boundaries."
+    },
+    {
+      "name": "advertised length above the configured limit",
+      "maxPayloadLength": 4,
+      "chunksHex": ["00000005"],
+      "error": "payload-too-large",
+      "why": "The bound is checked against the advertised length before any allocation, so a hostile prefix cannot force one."
+    },
+    {
+      "name": "advertised length exactly at the configured limit",
+      "maxPayloadLength": 4,
+      "chunksHex": ["0000000461626364"],
+      "payloadsHex": ["61626364"],
+      "residualBytes": 0,
+      "why": "The bound is inclusive. Rejecting the boundary value is the classic off-by-one that refuses valid traffic."
+    },
+    {
+      "name": "stream ends mid-payload",
+      "maxPayloadLength": 4096,
+      "chunksHex": ["0000000352"],
+      "payloadsHex": [],
+      "residualBytes": 5,
+      "finishError": "truncated-stream",
+      "why": "A peer that closes mid-record must be reported, not silently treated as a clean end of stream. The prefix stays buffered with the partial payload: an incomplete record is retained whole, never partially delivered."
+    },
+    {
+      "name": "stream ends mid-prefix",
+      "maxPayloadLength": 4096,
+      "chunksHex": ["0000"],
+      "payloadsHex": [],
+      "residualBytes": 2,
+      "finishError": "truncated-stream",
+      "why": "Two buffered bytes are not yet a length; the decoder must retain rather than guess."
+    }
+  ]
+}

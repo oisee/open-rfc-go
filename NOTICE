@@ -1,0 +1,16 @@
+open-rfc-go
+Copyright 2026 oisee (https://github.com/oisee)
+
+This product includes software developed as part of open-rfc
+(https://github.com/marianfoo/open-rfc), Copyright 2026 Marian Zeis,
+licensed under the Apache License, Version 2.0.
+
+open-rfc-go is a port of that work to Go. The Go source was rewritten by
+open-rfc-go contributors; individual files record the exact open-rfc source
+file and commit they were ported from, and the modifications made. See
+docs/provenance.md for the complete mapping. Behaviour is not guaranteed to
+match open-rfc, and open-rfc's maintainers do not support this port.
+
+SAP, ABAP, SAP S/4HANA, and SAP NetWeaver are trademarks or registered
+trademarks of SAP SE or its affiliates. open-rfc-go is an independent project
+and is not affiliated with, sponsored by, or endorsed by SAP SE.
