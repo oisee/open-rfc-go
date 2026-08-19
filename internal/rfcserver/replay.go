@@ -136,9 +136,11 @@ func ServeReplay(conn net.Conn, script []ReplayStep, logf func(string)) {
 	// template's own frames carry.
 	var goldenGUID []byte
 	for _, st := range script {
-		if g := findRFCGUID(st.Payload); g != nil {
-			goldenGUID = g
-			break
+		if st.Dir == "C->S" { // client records carry the GUID in init byte order
+			if g := findRFCGUID(st.Payload); g != nil {
+				goldenGUID = g
+				break
+			}
 		}
 	}
 	var clientConvID, clientGUID []byte
@@ -149,19 +151,29 @@ func ServeReplay(conn net.Conn, script []ReplayStep, logf func(string)) {
 			log(fmt.Sprintf("client closed after %d server frame(s): %v", si, err))
 			return
 		}
-		if clientConvID == nil {
+		// A single TCP connection is reused for several logons (SAP pools it).
+		// Each logon begins with a CPIC-init record and carries a fresh
+		// conversation id and RFC GUID, so re-capture them and rewind the reply
+		// pointer to the logon-accept (server frame 1; frame 0 is the one-time
+		// gateway record). Otherwise the second logon starves.
+		isInit := len(got) >= 2 && got[0] == 0x06 && got[1] == 0x03
+		if isInit {
 			if id := convIDOf(got); id != nil {
 				clientConvID = id
 			}
-		}
-		if clientGUID == nil {
 			if g := findRFCGUID(got); g != nil {
 				clientGUID = g
-				log(fmt.Sprintf("C->S %5dB %s  rfc-guid=%x", len(got), preview(got), g))
-			} else {
-				log(fmt.Sprintf("C->S %5dB %s", len(got), preview(got)))
 			}
+			if si > 1 {
+				si = 1
+			}
+			log(fmt.Sprintf("C->S %5dB %s  (re)logon conv=%s guid=%x", len(got), preview(got), string(clientConvID), clientGUID))
 		} else {
+			if clientConvID == nil {
+				if id := convIDOf(got); id != nil {
+					clientConvID = id
+				}
+			}
 			log(fmt.Sprintf("C->S %5dB %s", len(got), preview(got)))
 		}
 		if si >= len(server) {
@@ -170,7 +182,10 @@ func ServeReplay(conn net.Conn, script []ReplayStep, logf func(string)) {
 		}
 		out := withConvID(server[si], clientConvID)
 		if goldenGUID != nil && clientGUID != nil {
+			// The GUID appears in requests in init byte order and in server
+			// records byte-swapped (SAP structured GUID). Rewrite both forms.
 			out = bytes.ReplaceAll(out, goldenGUID, clientGUID)
+			out = bytes.ReplaceAll(out, swapRFCGUID(goldenGUID), swapRFCGUID(clientGUID))
 		}
 		if err := t.Send(out); err != nil {
 			log(fmt.Sprintf("S->C send (%dB) failed: %v", len(out), err))
@@ -208,6 +223,22 @@ func withConvID(frame, id []byte) []byte {
 // value is specific to the A4H test host (172.17.0.3) — an experiment aid, not a
 // general solution; proper generation would echo the client's GUID by field.
 var rfcGUIDNodeSuffix, _ = hex.DecodeString("e1000000ac110003")
+
+// swapRFCGUID converts a 16-byte RFC GUID between the wire's two representations:
+// the first three components (4+2+2 bytes) are byte-reversed, the last two
+// (2+6 bytes) are left as-is. This is the SAP structured-GUID mirroring seen
+// between a client's init record and the server's records.
+func swapRFCGUID(g []byte) []byte {
+	if len(g) != 16 {
+		return g
+	}
+	out := make([]byte, 16)
+	out[0], out[1], out[2], out[3] = g[3], g[2], g[1], g[0]
+	out[4], out[5] = g[5], g[4]
+	out[6], out[7] = g[7], g[6]
+	copy(out[8:], g[8:])
+	return out
+}
 
 // findRFCGUID returns the first 16-byte RFC connection GUID in b (a window whose
 // last 8 bytes are the node suffix), or nil.

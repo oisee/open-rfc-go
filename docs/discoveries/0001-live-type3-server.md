@@ -80,3 +80,51 @@ response — not replayed. That is the next M8 build.
 - `cmd/rfc-lab`: multi-protocol endpoint (type 3 sniff, type 3 our server,
   type H/G HTTP, type W WebSocket).
 - `cmd/rfc-server`: standalone replay server.
+
+## Update — first green: our server answers a live SM59 Connection Test
+
+After the walls above were mapped, the fixes landed and the type-3 Connection
+Test went **green answered entirely by our Go server** (sysnr 10 → port 3310),
+repeatably across many clicks. What it took, on top of the earlier list:
+
+- **GUID byte order.** The connection GUID is stored one way in the client's
+  records (init order) and byte-swapped in the server's (SAP structured GUID:
+  first three components reversed). Rewriting only one order tripped
+  `RFC_INVALID_UUID_DETECTED`; rewriting both orders (`swapRFCGUID`) cleared it.
+- **The logon-accept is 97% constant.** Diffing 9 real logons: only ~19 of 817
+  bytes vary — the uid byte, the conversation id (an ASCII counter at offset
+  40), and the GUID/timestamp bytes. Everything else is server identity. So the
+  accept is *generatable* from a template plus the client's session tokens.
+- **The connection is pooled.** SAP reuses one TCP socket for several logons;
+  each begins with a fresh CPIC-init carrying a new conversation id and GUID. The
+  server must re-capture both per init and rewind its reply sequence to the
+  logon-accept, or the second logon starves and hangs.
+
+With those, `ServeReplay` (request-driven, per-logon token rewriting) answers
+Connection Test after Connection Test.
+
+## Next wall — parameterized calls need fast-ser (Delta Manager)
+
+Running the traffic generator (real `CALL FUNCTION` with structures and tables)
+against our replay dies with **`DELTA_NO_OBJECT`** ("Delta Manager: 1 is not a
+valid object"): the ABAP client applies table/row results through the RFC
+fast-serialization Delta Manager, and our replayed ping responses carry no valid
+deltas. Connection Test (pure RFC_PING) is green; real data calls are not,
+because replay has no meaningful response for them.
+
+## Direction — a state machine, not replay
+
+The next build replaces replay with a real server:
+
+```
+CONNECT  accept gateway record, reply (bytes 29,55 set)
+LOGON    on CPIC-init: GENERATE the logon-accept (constant template + mirror
+         the client's conversation id and GUID) — no capture needed
+SESSION  per F_SAP_SEND: decode function + params -> handler -> encode response
+         (re-init on the same socket -> back to LOGON)
+```
+
+Handshake + RFC_PING are reachable with what is already known. Parameterized
+responses need a **fast-ser encoder** (the Delta Manager format) — the large,
+open piece, of which `DELTA_NO_OBJECT` is the first glimpse. This is the
+`docs/polyglot-rfc-server.md` server, now grounded in live wire facts.
