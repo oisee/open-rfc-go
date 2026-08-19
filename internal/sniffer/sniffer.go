@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oisee/open-rfc-go/internal/gateway"
@@ -39,7 +40,9 @@ const (
 // Frame is one observed NI record.
 type Frame struct {
 	Direction Direction
-	Index     int    // per-direction ordinal, starting at 0
+	ConnID    int    // per-proxy connection ordinal, starting at 1
+	Label     string // the proxy's role/port tag (e.g. "gw", "disp")
+	Index     int    // per-(connection,direction) ordinal, starting at 0
 	Payload   []byte // the NI payload (without the 4-byte length prefix)
 	Note      string // best-effort classification
 }
@@ -59,6 +62,13 @@ type Proxy struct {
 	Observe Observer
 	// DialTimeout bounds dialing the target (0 = no explicit timeout).
 	DialTimeout time.Duration
+	// Label tags every observed frame with this proxy's role/port (optional).
+	Label string
+	// Raw tees each read chunk verbatim instead of reassembling NI frames. Use
+	// for non-NI transports (WebSocket, HTTP) so their bytes are still captured.
+	Raw bool
+
+	connSeq atomic.Int64
 }
 
 // Serve listens on listenAddr and proxies every accepted connection to Target
@@ -113,17 +123,22 @@ func (p *Proxy) handle(ctx context.Context, client net.Conn) error {
 	}
 	defer server.Close()
 
+	connID := int(p.connSeq.Add(1))
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); p.pump(ClientToServer, client, server) }()
-	go func() { defer wg.Done(); p.pump(ServerToClient, server, client) }()
+	go func() { defer wg.Done(); p.pump(connID, ClientToServer, client, server) }()
+	go func() { defer wg.Done(); p.pump(connID, ServerToClient, server, client) }()
 	wg.Wait()
 	return nil
 }
 
 // pump copies src→dst verbatim while reassembling and observing NI frames. On
 // any read/write error it closes both ends so the peer pump also unwinds.
-func (p *Proxy) pump(dir Direction, src, dst net.Conn) {
+func (p *Proxy) pump(connID int, dir Direction, src, dst net.Conn) {
+	if p.Raw {
+		p.pumpRaw(connID, dir, src, dst)
+		return
+	}
 	max := p.MaxPayload
 	if max <= 0 {
 		max = ni.DefaultMaxPayloadLength
@@ -142,14 +157,37 @@ func (p *Proxy) pump(dir Direction, src, dst net.Conn) {
 			frames, derr := dec.Push(buf[:n])
 			if derr != nil {
 				// Lost framing sync; keep forwarding raw but stop observing.
-				p.Observe(Frame{Direction: dir, Index: index, Note: "framing error: " + derr.Error()})
+				p.Observe(Frame{Direction: dir, ConnID: connID, Label: p.Label, Index: index, Note: "framing error: " + derr.Error()})
 				p.forwardRaw(src, dst)
 				return
 			}
 			for _, f := range frames {
-				p.Observe(Frame{Direction: dir, Index: index, Payload: f, Note: classify(dir, f)})
+				p.Observe(Frame{Direction: dir, ConnID: connID, Label: p.Label, Index: index, Payload: f, Note: classify(dir, f)})
 				index++
 			}
+		}
+		if rerr != nil {
+			return
+		}
+	}
+}
+
+// pumpRaw copies src→dst verbatim, teeing each read chunk to the observer as one
+// frame. For transports that are not NI-framed (WebSocket, HTTP over TLS).
+func (p *Proxy) pumpRaw(connID int, dir Direction, src, dst net.Conn) {
+	buf := make([]byte, 32*1024)
+	index := 0
+	defer func() { _ = src.Close(); _ = dst.Close() }()
+	for {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return
+			}
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			p.Observe(Frame{Direction: dir, ConnID: connID, Label: p.Label, Index: index, Payload: chunk, Note: "raw chunk"})
+			index++
 		}
 		if rerr != nil {
 			return

@@ -108,3 +108,34 @@ Four items convert a faithful port into a differentiated product, all P0/P1:
 **a real public `rfc` package, ABAP errors as typed errors, a metadata cache,
 and codegen.** tRFC/qRFC, an RFC server (see `docs/polyglot-rfc-server.md`), and
 SNC are the larger, later bets.
+
+## Backlog: content-addressed response replay (mock RFC server)
+
+`cmd/rfc-server -replay` today drives one recorded connection in strict
+lockstep: it sends the Nth recorded server frame after the Nth client frame,
+ignoring what was actually asked. That proves the server-side transport but
+desyncs the moment a live client calls functions in a different order or with
+different arguments.
+
+The next step is a **content-addressed responder**: index a capture (or a
+directory of captures) by the decoded request, and answer a live call by
+matching it — not by position. Match tiers, most-specific first:
+
+1. **FM name + all import/table parameters equal** — exact replay; safest.
+2. **FM name + a subset of parameters** (a configurable key set, e.g. match
+   `QUERY_TABLE` for `RFC_READ_TABLE` but ignore `ROWCOUNT`) — parameterized.
+3. **FM name only** — return the last recorded response for that function; a
+   loose fallback for stateless calls (`RFC_PING`, `RFC_SYSTEM_INFO`).
+
+Miss policy is explicit: a configurable order of tiers, then either a recorded
+default or a `FU_NOT_FOUND`/`SYSTEM_FAILURE` exception via the existing
+`rfcserver` encoders. This turns a capture into a faithful mock of a real
+system — for tests, demos, and offline development — and is the natural bridge
+from replay to a Dispatcher that generates responses.
+
+Prereqs already in place: `rfcserver.DecodeCutFunctionRequest` (request key),
+`rfcserver.EncodeCutFunctionResponse` / `EncodeCutFunctionExceptionResponse`
+(answers), and the `-replay` transport loop (accept + NI + gateway + APPC). The
+open work is the request→response index, the tiered matcher, and reproducing the
+CPIC init/logon-accept per fresh connection (the one part replay currently gets
+for free by echoing recorded bytes).
