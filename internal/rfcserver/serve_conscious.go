@@ -24,7 +24,7 @@ import (
 // It generates classic-serialization responses, so the client must speak classic
 // (SM59 Special Options → Serializer = Classic serializer). RFC_PING falls back
 // to the baked ping dance when no handler is registered for it.
-func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
+func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(dir string, frame []byte)) {
 	defer conn.Close()
 	log := func(s string) {
 		if logf != nil {
@@ -33,6 +33,12 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 	}
 	t := transport.New(conn, transport.Options{})
 	ctx := context.Background()
+	send := func(b []byte) error {
+		if dump != nil {
+			dump("S->C", b)
+		}
+		return t.Send(b)
+	}
 	var convID, guid []byte
 	pingStep := 0
 	for {
@@ -41,12 +47,15 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 			log(fmt.Sprintf("client closed: %v", err))
 			return
 		}
+		if dump != nil {
+			dump("C->S", got)
+		}
 		switch {
 		case len(got) == 64: // gateway record
 			reply := append([]byte(nil), got...)
 			reply[29] = 0x0f
 			reply[55] = 0xfb
-			if t.Send(reply) != nil {
+			if send(reply) != nil {
 				return
 			}
 			log("CONNECT: gateway acknowledged")
@@ -54,7 +63,7 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 			convID = append([]byte(nil), got[40:48]...)
 			guid = findRFCGUID(got)
 			acc := patchSession(acceptFor(len(got)), convID, guid)
-			if t.Send(acc) != nil {
+			if send(acc) != nil {
 				return
 			}
 			pingStep = 0
@@ -69,7 +78,7 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 			if _, ok := d.handler(fn); !ok && fn == "RFC_PING" {
 				// no ping handler: keep the client alive with the recorded dance
 				resp := patchSession(smartPingSteps[pingStep%len(smartPingSteps)], convID, guid)
-				if t.Send(resp) != nil {
+				if send(resp) != nil {
 					return
 				}
 				pingStep++
@@ -94,7 +103,7 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 				log("SESSION: wrap error: " + werr.Error())
 				return
 			}
-			if t.Send(wrapped) != nil {
+			if send(wrapped) != nil {
 				return
 			}
 		default:

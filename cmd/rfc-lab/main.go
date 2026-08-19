@@ -22,6 +22,8 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -350,6 +352,14 @@ func labBridge() *rfcserver.Dispatcher {
 
 func serveConsciousLoop(ctx context.Context, listen string) error {
 	d := labBridge()
+	df, _ := os.Create("cap-gen.jsonl")
+	var dmu sync.Mutex
+	denc := json.NewEncoder(df)
+	dump := func(dir string, frame []byte) {
+		dmu.Lock()
+		defer dmu.Unlock()
+		_ = denc.Encode(map[string]any{"dir": dir, "len": len(frame), "hex": hex.EncodeToString(frame)})
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", listen)
 	if err != nil {
@@ -365,7 +375,7 @@ func serveConsciousLoop(ctx context.Context, listen string) error {
 			return err
 		}
 		fmt.Printf("rfc-lab[gen]: client %s\n", conn.RemoteAddr())
-		go rfcserver.ServeConscious(conn, d, func(s string) { fmt.Println("  [gen] " + s) })
+		go rfcserver.ServeConscious(conn, d, func(s string) { fmt.Println("  [gen] " + s) }, dump)
 	}
 }
 

@@ -358,3 +358,26 @@ classic response now decodes end to end: envelope classify → scalars → table
 **Next:** the ENCODE side — a "conscious" smart server that GENERATES these
 responses from values (inverse of the decode above), then the polyglot RFC
 bridge (`docs/polyglot-rfc-server.md`).
+
+## Step 3/4 — the serializer is negotiated by the SERVER's logon-accept
+
+Calling the real custom FMs from our Go **client** works fully: Z_DOUBLE(21)=42,
+Z_GREET("world"), against live A4H, direct and via the sniffer — metadata
+discovery + typed call + decode, all classic, pure Go.
+
+The **server** (conscious/bridge) hit the serializer-negotiation wall. Dumping our
+server's own exchange (cap-gen.jsonl, added to ServeConscious) showed the S4
+client sending its import parameter inside a **fast-serialization 0x5001
+container**, which our request decoder does not read (imports came out empty →
+Z_DOUBLE rc=2). Crucially: the SM59 destination A4H@GEN is set to **Classic
+serializer**, yet the request is fast — because the actual serializer is
+negotiated by the SERVER's logon-accept, not the client's preference. Our server
+replays an accept borrowed from a fast-ser session, so it advertises fast; the
+client obeys. The real .103, given the same Classic destination, advertised
+classic and got classic parameters (0x0201/0x0203), which we decode.
+
+So a fully-working conscious server needs either (A) to GENERATE a classic
+logon-accept for the client's init (the init-dependent accept generation, which
+also selects the serializer), or (B) full fast-serialization both ways (decode
+0x5001 requests and encode fast-ser responses with multiref). The client side is
+complete; the server's serializer negotiation is the open piece.
