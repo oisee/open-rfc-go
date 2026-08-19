@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/oisee/open-rfc-go/internal/bridge"
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
 	"github.com/oisee/open-rfc-go/internal/sniffer"
 )
@@ -305,8 +306,50 @@ func serveReplayLoop(ctx context.Context, listen string, script []rfcserver.Repl
 	}
 }
 
+func labBridge() *rfcserver.Dispatcher {
+	b := bridge.New()
+	// STFC_CONNECTION: echo REQUTEXT back and stamp RESPTEXT.
+	b.Register(bridge.Func{
+		Name: "STFC_CONNECTION",
+		Params: []bridge.Param{
+			{Name: "REQUTEXT", Dir: bridge.Import, Kind: bridge.Char, Length: 255},
+			{Name: "ECHOTEXT", Dir: bridge.Export, Kind: bridge.Char, Length: 255},
+			{Name: "RESPTEXT", Dir: bridge.Export, Kind: bridge.Char, Length: 255},
+		},
+		Call: func(ctx context.Context, in bridge.Values) (bridge.Values, error) {
+			echo, _ := in["REQUTEXT"].(string)
+			return bridge.Values{"ECHOTEXT": echo, "RESPTEXT": "open-rfc-go polyglot bridge (Go)"}, nil
+		},
+	})
+	// Z_DOUBLE: an ordinary Go function exposed as an RFC FM.
+	b.Register(bridge.Func{
+		Name: "Z_DOUBLE",
+		Params: []bridge.Param{
+			{Name: "N", Dir: bridge.Import, Kind: bridge.Int},
+			{Name: "RESULT", Dir: bridge.Export, Kind: bridge.Int},
+		},
+		Call: func(ctx context.Context, in bridge.Values) (bridge.Values, error) {
+			n, _ := in["N"].(int32)
+			return bridge.Values{"RESULT": n * 2}, nil
+		},
+	})
+	// Z_GREET: another Go function as an FM.
+	b.Register(bridge.Func{
+		Name: "Z_GREET",
+		Params: []bridge.Param{
+			{Name: "NAME", Dir: bridge.Import, Kind: bridge.Char, Length: 30},
+			{Name: "GREETING", Dir: bridge.Export, Kind: bridge.Char, Length: 90},
+		},
+		Call: func(ctx context.Context, in bridge.Values) (bridge.Values, error) {
+			name, _ := in["NAME"].(string)
+			return bridge.Values{"GREETING": "Hello, " + name + " — from Go over RFC"}, nil
+		},
+	})
+	return b.Dispatcher()
+}
+
 func serveConsciousLoop(ctx context.Context, listen string) error {
-	d := rfcserver.DefaultDispatcher()
+	d := labBridge()
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", listen)
 	if err != nil {
