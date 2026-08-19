@@ -5,6 +5,7 @@ package rfcserver
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -76,12 +77,31 @@ func ServeSmart(conn net.Conn, logf func(string)) {
 			step = 0
 			log(fmt.Sprintf("LOGON: accept generated (conv=%s guid=%x)", string(convID), guid))
 		case len(got) > 80 && got[0] == 0x06 && got[1] == byte(0xcb): // SESSION: function request
-			resp := patchSession(smartPingSteps[step%len(smartPingSteps)], convID, guid)
-			if err := t.Send(resp); err != nil {
-				return
+			fn := "?"
+			if req, err := DecodeCutFunctionRequest(got[80:]); err == nil {
+				fn = req.FunctionName
 			}
-			log(fmt.Sprintf("SESSION: RFC_PING step %d answered", step))
-			step++
+			switch fn {
+			case "RFC_PING", "?": // the ping/RSRFCPIN dance (or an undecodable, assumed-ping frame)
+				resp := patchSession(smartPingSteps[step%len(smartPingSteps)], convID, guid)
+				if err := t.Send(resp); err != nil {
+					return
+				}
+				log(fmt.Sprintf("SESSION: %s step %d answered", fn, step))
+				step++
+			default: // decoded, but no handler yet — fail cleanly instead of hanging
+				uid := binary.BigEndian.Uint16(got[4:6])
+				exc, _ := EncodeCutFunctionExceptionResponse("SYSTEM_FAILURE")
+				wrapped, werr := wrapFSapSend(exc, convID, uid)
+				if werr != nil {
+					log("SESSION: wrap error: " + werr.Error())
+					return
+				}
+				if err := t.Send(wrapped); err != nil {
+					return
+				}
+				log(fmt.Sprintf("SESSION: %s not implemented -> SYSTEM_FAILURE", fn))
+			}
 		default: // control frames (80-byte turn/end, NI pings) need no reply
 			log(fmt.Sprintf("(control %dB, no reply)", len(got)))
 		}
