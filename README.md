@@ -1,11 +1,34 @@
 # open-rfc-go
 
 A Go port of [`open-rfc`](https://github.com/marianfoo/open-rfc) — an SDK-free
-client for SAP classic synchronous RFC.
+client, and now an experimental server, for SAP classic synchronous RFC.
 
-**Nothing here connects to an SAP system yet.** This repository is at the first
-milestone of a staged port: the wire-framing layer. There is no client, no
-connection pool, no release, and no support boundary. Do not depend on it.
+> ## 🎉 Both directions are live against real SAP — with zero SAP libraries
+>
+> **2026-08-19 — open-rfc-go now speaks classic RFC _as the server_, not only the client.**
+> A live SAP system (A4H, SAP_BASIS 793) ran a real ABAP program of six parametrized
+> calls and **open-rfc-go answered every one, `rc=0`**, as the server:
+>
+> | call | result |
+> |---|---|
+> | `RFC_PING` | rc=0 |
+> | `RFC_SYSTEM_INFO` | rc=0 · sysid=A4H |
+> | `STFC_CONNECTION` | rc=0 · echo returned (with its server→client callback) |
+> | `STFC_STRUCTURE` | rc=0 · structure + table |
+> | `RFC_READ_TABLE` | rc=0 · 17 cols × 2 rows |
+> | `STFC_STRING` | rc=0 |
+>
+> The **client** leg is live-proven too (STFC_CONNECTION / STFC_STRUCTURE / RFC_READ_TABLE
+> against A4H). Pure Go — no NW RFC SDK, no native library.
+>
+> 📖 The full wire journey — gateway record, CPIC logon-accept, per-session token
+> mirroring (conversation id + RFC GUID in both byte orders), the RSRFCPIN dance —
+> is written up in [`docs/discoveries/0001`](docs/discoveries/0001-live-type3-server.md).
+
+**Still pre-release.** There is no published release and no support boundary. The
+server today answers by matching each request to a captured reply and patching this
+session's tokens; a meaningful fast-ser codec that generates responses from values
+is the next step. Do not depend on it yet.
 
 📋 **[Cheat sheet](docs/cheatsheet.md)** — ports, auth, constants, layer map,
 commands, and the known cross-language hazards, on one page.
