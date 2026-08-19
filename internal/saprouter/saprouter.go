@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -358,4 +359,41 @@ func hasPrefix(value, prefix []byte) bool {
 		return false
 	}
 	return bytesEqual(value[:len(prefix)], prefix)
+}
+
+// PerformRoute performs the NI_ROUTE handshake over an established connection to
+// the first router hop: it sends the route request as one NI record and reads
+// the NI_PONG acknowledgement (or an NI_RTERR error). On success the connection
+// is tunneled to the route's final hop. Pass niVersion 0 for the default.
+func PerformRoute(conn io.ReadWriter, route *Route, niVersion int) error {
+	payload, err := EncodeRouteRequestPayload(route, niVersion)
+	if err != nil {
+		return err
+	}
+	frame := make([]byte, 4+len(payload))
+	binary.BigEndian.PutUint32(frame[0:], uint32(len(payload)))
+	copy(frame[4:], payload)
+	if _, err := conn.Write(frame); err != nil {
+		return fmt.Errorf("%w: sending NI_ROUTE: %v", ErrInvalidResponse, err)
+	}
+	var lengthPrefix [4]byte
+	if _, err := io.ReadFull(conn, lengthPrefix[:]); err != nil {
+		return fmt.Errorf("%w: reading response length: %v", ErrInvalidResponse, err)
+	}
+	responseLength := binary.BigEndian.Uint32(lengthPrefix[:])
+	if responseLength > MaxResponsePayloadBytes {
+		return fmt.Errorf("%w: response exceeds %d bytes", ErrInvalidResponse, MaxResponsePayloadBytes)
+	}
+	response := make([]byte, responseLength)
+	if _, err := io.ReadFull(conn, response); err != nil {
+		return fmt.Errorf("%w: reading response: %v", ErrInvalidResponse, err)
+	}
+	decoded, err := DecodeRouteResponse(response)
+	if err != nil {
+		return err
+	}
+	if decoded.Kind != Accepted {
+		return fmt.Errorf("%w: router rejected the route (return code %d)", ErrInvalidRoute, decoded.ReturnCode)
+	}
+	return nil
 }

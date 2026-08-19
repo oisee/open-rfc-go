@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/oisee/open-rfc-go/internal/ni"
+	"github.com/oisee/open-rfc-go/internal/saprouter"
 )
 
 // ErrClosed reports a read or write on a connection the peer has closed.
@@ -58,6 +59,58 @@ func Dial(ctx context.Context, network, addr string, opts Options) (*Transport, 
 		return nil, fmt.Errorf("transport: dial %s: %w", addr, err)
 	}
 	return New(conn, opts), nil
+}
+
+// ContextDialer dials a (possibly tunneled) TCP connection. *socks5.Dialer
+// satisfies it, so a SOCKS5 proxy can front the connection.
+type ContextDialer interface {
+	Dial(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// DialOptions extends Options with routed/proxied dialing. A nil Proxy dials
+// directly; a nil Router connects straight to addr.
+type DialOptions struct {
+	Options
+	// Proxy, if set, establishes the first TCP hop through a proxy (e.g. SOCKS5)
+	// instead of a direct dial.
+	Proxy ContextDialer
+	// Router, if set, is a completed SAProuter route; the dialer connects to its
+	// first hop and performs the NI_ROUTE handshake, tunneling to the final hop.
+	Router *saprouter.Route
+	// RouterNIVersion overrides the SAProuter NI version (0 = default).
+	RouterNIVersion int
+}
+
+// DialWith opens a connection, optionally through a SOCKS5 proxy and/or a
+// SAProuter route, and frames it as NI. When Router is set, addr is ignored (the
+// route carries the target); otherwise the dialer connects to addr.
+func DialWith(ctx context.Context, network, addr string, opts DialOptions) (*Transport, error) {
+	dialAddr := addr
+	if opts.Router != nil {
+		dialAddr = net.JoinHostPort(opts.Router.FirstHop.Host, opts.Router.FirstHop.Service)
+	}
+	var conn net.Conn
+	var err error
+	if opts.Proxy != nil {
+		conn, err = opts.Proxy.Dial(ctx, network, dialAddr)
+	} else {
+		var d net.Dialer
+		conn, err = d.DialContext(ctx, network, dialAddr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("transport: dial %s: %w", dialAddr, err)
+	}
+	if opts.Router != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			_ = conn.SetDeadline(deadline)
+		}
+		if err := saprouter.PerformRoute(conn, opts.Router, opts.RouterNIVersion); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("transport: saprouter handshake: %w", err)
+		}
+		_ = conn.SetDeadline(time.Time{})
+	}
+	return New(conn, opts.Options), nil
 }
 
 // New adopts an already-connected stream (for example a routed socket).

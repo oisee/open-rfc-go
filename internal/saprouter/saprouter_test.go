@@ -5,6 +5,8 @@ package saprouter
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+	"net"
 	"reflect"
 	"testing"
 )
@@ -331,3 +333,75 @@ func TestDecodeRTERROracle(t *testing.T) {
 		t.Fatalf("documented rterr = %+v", resp)
 	}
 }
+
+// --- NI_ROUTE handshake ------------------------------------------------------
+
+func niFrame(payload []byte) []byte {
+	f := make([]byte, 4+len(payload))
+	f[0] = byte(len(payload) >> 24)
+	f[1] = byte(len(payload) >> 16)
+	f[2] = byte(len(payload) >> 8)
+	f[3] = byte(len(payload))
+	copy(f[4:], payload)
+	return f
+}
+
+func readNIFrame(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	var l [4]byte
+	if _, err := io.ReadFull(r, l[:]); err != nil {
+		t.Fatalf("read frame len: %v", err)
+	}
+	n := int(l[0])<<24 | int(l[1])<<16 | int(l[2])<<8 | int(l[3])
+	p := make([]byte, n)
+	if _, err := io.ReadFull(r, p); err != nil {
+		t.Fatalf("read frame body: %v", err)
+	}
+	return p
+}
+
+func TestPerformRouteAccepted(t *testing.T) {
+	client, router := netPipe()
+	defer client.Close()
+	route, err := Admit("/H/127.0.0.1/S/3299/H/sap.example/S/3300")
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	go func() {
+		defer router.Close()
+		req := readNIFrame(t, router)
+		if !bytesHasPrefix(req, []byte("NI_ROUTE\x00")) {
+			t.Errorf("router did not receive NI_ROUTE: % x", req[:9])
+		}
+		router.Write(niFrame([]byte("NI_PONG\x00")))
+	}()
+	if err := PerformRoute(client, route, 0); err != nil {
+		t.Fatalf("PerformRoute: %v", err)
+	}
+}
+
+func TestPerformRouteRejected(t *testing.T) {
+	client, router := netPipe()
+	defer client.Close()
+	route, _ := Admit("/H/127.0.0.1/S/3299/H/sap.example/S/3300")
+	go func() {
+		defer router.Close()
+		_ = readNIFrame(t, router)
+		e := make([]byte, 20)
+		copy(e, "NI_RTERR\x00")
+		e[9] = 40
+		rc := int32(-94)
+		e[12] = byte(uint32(rc) >> 24)
+		e[13] = byte(uint32(rc) >> 16)
+		e[14] = byte(uint32(rc) >> 8)
+		e[15] = byte(uint32(rc))
+		router.Write(niFrame(e))
+	}()
+	if err := PerformRoute(client, route, 0); err == nil {
+		t.Fatalf("expected rejection error")
+	}
+}
+
+func bytesHasPrefix(b, p []byte) bool { return len(b) >= len(p) && string(b[:len(p)]) == string(p) }
+
+func netPipe() (net.Conn, net.Conn) { return net.Pipe() }

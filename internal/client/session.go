@@ -30,6 +30,7 @@ import (
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
 	"github.com/oisee/open-rfc-go/internal/gateway"
+	"github.com/oisee/open-rfc-go/internal/saprouter"
 	"github.com/oisee/open-rfc-go/internal/transport"
 )
 
@@ -57,6 +58,12 @@ type SessionOptions struct {
 	ProgramName              string // default "open-rfc"
 	LocalAddress             string // advertised IPv4; default 127.0.0.1
 	OperationTimeout         time.Duration
+	// Router, if set, routes the connection through a SAProuter (its final hop
+	// is the target gateway).
+	Router *saprouter.Route
+	// Proxy, if set, establishes the first TCP hop through a proxy (e.g. a
+	// *socks5.Dialer).
+	Proxy transport.ContextDialer
 	// Transport, if set, is used instead of dialing Host:Port (for tests).
 	Transport Transport
 }
@@ -144,7 +151,15 @@ func Open(ctx context.Context, opts SessionOptions) (*Session, error) {
 
 	tr := opts.Transport
 	if tr == nil {
-		dialed, err := transport.Dial(ctx, "tcp", fmt.Sprintf("%s:%d", opts.Host, opts.Port), transport.Options{ReadTimeout: opTimeout, WriteTimeout: opTimeout})
+		transportOpts := transport.Options{ReadTimeout: opTimeout, WriteTimeout: opTimeout}
+		addr := fmt.Sprintf("%s:%d", opts.Host, opts.Port)
+		var dialed *transport.Transport
+		var err error
+		if opts.Router != nil || opts.Proxy != nil {
+			dialed, err = transport.DialWith(ctx, "tcp", addr, transport.DialOptions{Options: transportOpts, Proxy: opts.Proxy, Router: opts.Router})
+		} else {
+			dialed, err = transport.Dial(ctx, "tcp", addr, transportOpts)
+		}
 		if err != nil {
 			return nil, err
 		}
