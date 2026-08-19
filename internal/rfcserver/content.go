@@ -190,8 +190,8 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 		switch {
 		case len(got) == 64:
 			reply := append([]byte(nil), got...)
-			reply[29] = 0x0f
-			reply[55] = 0xfb
+			reply[gatewayAckOffset1] = gatewayAckLevel
+			reply[gatewayAckOffset2] = gatewayAckCaps
 			if tr.Send(reply) != nil {
 				return
 			}

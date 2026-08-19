@@ -53,8 +53,8 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 		switch {
 		case len(got) == 64: // gateway record
 			reply := append([]byte(nil), got...)
-			reply[29] = 0x0f
-			reply[55] = 0xfb
+			reply[gatewayAckOffset1] = gatewayAckLevel
+			reply[gatewayAckOffset2] = gatewayAckCaps
 			if send(reply) != nil {
 				return
 			}
