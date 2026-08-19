@@ -158,3 +158,18 @@ capabilities and emit the matching accept. That, plus the fast-ser Delta encoder
 for table results, are the two large research pieces remaining. Everything up to
 here — transport, gateway, per-session token mirroring, request decode/dispatch,
 and a green Connection Test answered by our own Go — is done and on main.
+
+## Update — accept selection passes Unicode; programs prove generation is required
+
+Keeping two accept templates and selecting by the client's init length makes the
+**Unicode Test pass green** (init 1444B → accept 1079B; Connection Test 1818B →
+817B). But a real calling program (`ZLOCAL_RFC_TEST`) logs on repeatedly with
+*different* init sizes — 1444, 1668, and more — each expecting its own accept.
+Template selection cannot cover an open set of inits, so it stalls (the client
+sends an 80-byte control and never issues its call).
+
+Definitive: the logon-accept must be **generated from the init** — parse what the
+init requests and emit the corresponding accept — not chosen from captures. Two
+research pieces remain for a general server: (1) init→accept generation, (2) the
+fast-ser Delta encoder for parameterized results. Fixed handshake tests
+(Connection, Unicode) work today; arbitrary programs need both.
