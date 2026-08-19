@@ -33,6 +33,7 @@ const PingFunction = "RFC_PING"
 // satisfies it.
 type Session interface {
 	Call(ctx context.Context, functionName string, imports []cpic.NamedValue, requestedOutputs []string) (client.CallResult, error)
+	CallRaw(ctx context.Context, request []byte) (client.CallResult, error)
 	Authenticated() bool
 	Close() error
 }
@@ -59,6 +60,18 @@ func (m *Managed) Call(ctx context.Context, functionName string, imports []cpic.
 		return client.CallResult{}, ErrClosed
 	}
 	return m.sess.Call(ctx, functionName, imports, requestedOutputs)
+}
+
+// CallRaw sends a pre-built classic-RFC (CUT) request, serialized against every
+// other operation on this session. The public rfc package uses it to run
+// metadata requests and fully-built calls.
+func (m *Managed) CallRaw(ctx context.Context, request []byte) (client.CallResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return client.CallResult{}, ErrClosed
+	}
+	return m.sess.CallRaw(ctx, request)
 }
 
 // Ping probes the session with RFC_PING. A nil return means the session is

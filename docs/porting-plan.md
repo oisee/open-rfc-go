@@ -21,6 +21,7 @@ and `context.Context`; and about 7k (`src/compat/`) is dropped outright.
 | 3b | Structure & xRFC codecs (classic-structure, classic-xrfc, recursive xRFC) | `src/values/{classic-structure,classic-xrfc,recursive-*}.ts` | **done** — flat structures/tables verified live; all three xRFC codecs (`classic-xrfc`, `recursive-xrfc`, `recursive-classic-xrfc`) ported with oracle tests + fuzz in `internal/xrfc` |
 | 4 | Metadata decoders: `RFC_METADATA_GET`, `DDIF_FIELDINFO`, function/structure interface (+ `classic-rfc`) | `src/metadata/{recursive-metadata,recursive-parameter-index,rfc-function-interface,rfc-structure-definition,ddif-fieldinfo,rfc-metadata-get}.ts`, `src/protocol/classic-rfc.ts` | **done** |
 | 5 | Transport over `net.Conn`; first live `STFC_CONNECTION` | `src/transport/ni-socket.ts`, `src/client/direct-cpic-session.ts` | **done** (live call verified 2026-08-19 against A4H, kernel 758) |
+| 7 | Public `rfc` package: typed `Client`/`Call`, ABAP errors as `*ABAPException`, metadata cache | new public surface (`rfc/`) | **done** (live vs A4H) |
 | 6 | Pool, session contexts, transactions, SAProuter, SOCKS5 | `src/pool/`, `src/lifecycle/`, `src/transport/` | **in progress** — connection pool (`internal/pool`), SAProuter route codec (`internal/saprouter`), SOCKS5 dialer (`internal/socks5`), and session lifecycle + pool integration (`internal/lifecycle`) done, Go-idiomatic; router/socks5 wired into the dial path (`transport.DialWith` + `client.SessionOptions.Router/Proxy`); remaining: transaction units (tRFC/qRFC), deferred to a later milestone |
 
 The metadata **repository runtime** (`src/metadata/repository-runtime.ts`) and
@@ -143,6 +144,15 @@ how it plugs into the wider SDK-free SAP toolchain:
   and odata_mcp_go (OData↔MCP) as the third, RFC transport.
 - `docs/rfc-assistance.md` — AI-assisted SAP debugging over classic RFC
   (diagnostic surfaces, an agentic triage loop, safety, library additions).
+- **RFC sniffer + proxy (MITM, in-between-to-SAP)** — a man-in-the-middle that
+  listens as a fake endpoint, forwards bytes to a real SAP system, and decodes/
+  logs every NI frame and CUT request/response with our own codecs. Three uses:
+  a debugging/learning tool (see exactly what a real client sends), a
+  conformance tool (validate decoders against live bidirectional traffic), and —
+  key for the RFC-server track — a **protocol-derivation** tool: capture the
+  exact `GW_REGISTER` and inbound serving bytes by proxying a real RFC-SDK client
+  or an ABAP→registered-server call, turning "derive the format" into "observe
+  it". A de-risker for the polyglot RFC-server work.
 - `docs/polyglot-rfc-server.md` — expose *any* external library (Python/C/Rust/
   Swift/Go) to ABAP by generating an RFC server plus ABAP proxy FM/interface+class
   wrappers, deployed via vsp. Sits on the milestone-6 RFC-server track.

@@ -42,6 +42,11 @@ func (f *fakeSession) Call(ctx context.Context, fn string, imports []cpic.NamedV
 	return client.CallResult{Success: true}, nil
 }
 
+func (f *fakeSession) CallRaw(ctx context.Context, request []byte) (client.CallResult, error) {
+	f.calls.Add(1)
+	return client.CallResult{Success: true}, nil
+}
+
 func (f *fakeSession) Authenticated() bool { return !f.closed.Load() }
 func (f *fakeSession) Close() error        { f.closed.Store(true); return nil }
 

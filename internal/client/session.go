@@ -30,6 +30,7 @@ import (
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
 	"github.com/oisee/open-rfc-go/internal/gateway"
+	"github.com/oisee/open-rfc-go/internal/rfcerr"
 	"github.com/oisee/open-rfc-go/internal/saprouter"
 	"github.com/oisee/open-rfc-go/internal/transport"
 )
@@ -484,10 +485,12 @@ func (s *Session) writeDataPlan(ctx context.Context, plan []appc.OutgoingDataFra
 	return nil
 }
 
-// CallResult holds the decoded application fields of one RFC call.
+// CallResult holds the decoded application fields of one RFC call, plus the
+// decoded error envelope (outcome, ABAP exception/message/runtime facts).
 type CallResult struct {
-	Success bool
-	Fields  []cpic.Field
+	Success  bool
+	Fields   []cpic.Field
+	Envelope rfcerr.Envelope
 }
 
 // Call invokes one classic Unicode (CUT) function with the given imports,
@@ -509,7 +512,7 @@ func (s *Session) Call(ctx context.Context, functionName string, imports []cpic.
 	if err != nil {
 		return CallResult{}, err
 	}
-	return CallResult{Success: decoded.Success, Fields: decoded.Fields}, nil
+	return CallResult{Success: decoded.Success, Fields: decoded.Fields, Envelope: decoded.Envelope}, nil
 }
 
 // CallRaw sends a pre-built classic-RFC (CUT) request and returns the decoded
@@ -528,7 +531,7 @@ func (s *Session) CallRaw(ctx context.Context, request []byte) (CallResult, erro
 	if err != nil {
 		return CallResult{}, err
 	}
-	return CallResult{Success: decoded.Success, Fields: decoded.Fields}, nil
+	return CallResult{Success: decoded.Success, Fields: decoded.Fields, Envelope: decoded.Envelope}, nil
 }
 
 // CallSTFCConnection invokes STFC_CONNECTION with REQUTEXT and returns ECHOTEXT.
