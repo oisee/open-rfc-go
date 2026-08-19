@@ -217,7 +217,8 @@ func withConvID(frame, id []byte) []byte {
 	return out
 }
 
-// rfcGUIDNodeSuffix is the last 8 bytes of the RFC connection GUID: the RFC node
+// rfcGUIDNodeSuffix is the last 8 bytes of the RFC connection GUID (see
+// docs/discoveries/0002-wire-constants.md): the RFC node
 // id (0xe100...) plus the host address. It is stable for one SAP host, so a GUID
 // is located by finding this suffix and taking the 16 bytes ending at it. This
 // value is specific to the A4H test host (172.17.0.3) — an experiment aid, not a

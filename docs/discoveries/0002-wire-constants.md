@@ -107,3 +107,26 @@ this project's own codecs, and diffing sessions to separate constant structure
 from per-session tokens. Provenance for each is the capture and the diff recorded
 in [0001](0001-live-type3-server.md); none of these values comes from SAP
 documentation.
+
+## Where the constants live in code
+
+Named, commented constants central to the server track:
+
+| File | Constants |
+|---|---|
+| `internal/rfcserver/wire_constants.go` | `appcProtocol` 0x06, `appcInit` 0x03, `appcFSapSend` 0xcb, `appcUIDOffset` 4, `appcConvOffset` 40, `appcHeaderLen` 80, `gatewayRecordLen` 64, `gatewayAckOffset1` 29 / `gatewayAckLevel` 0x0f, `gatewayAckOffset2` 55 / `gatewayAckCaps` 0xfb, `cutReqTag0/1` 0x05/0x02, `cutRespT1` 0x00, `niKeepaliveLen` 8, `initMinLen` 200, `cutPrefixLen` 4 |
+| `internal/rfcserver/content.go` | `niPing`/`niPong` ("NI_PING\0"/"NI_PONG\0"); the `isInit`/`isFSapSend`/`isFuncRequest` classifiers |
+| `internal/rfcserver/replay.go` | `rfcGUIDNodeSuffix` `e1000000ac110003`, `swapRFCGUID` (structured swap), `convIDOf`/`withConvID` (conv id at offset 40) |
+| `internal/rfcserver/response.go` | CUT prefixes 05 00 00 00 / trailer ff ff; response tags 0x0503/0x0514/0x0420/0x0512/0x0205/0x0201/0x0203/0x0130/0x0667; `0x0104[205] = swapRFCGUID(guid)[0] - 2` |
+| `internal/rfcserver/s4_envelope.go` | baked `0x0667` metric and `0x0104` metadata templates |
+| `internal/rfcserver/serve_smart.go` / `serve_generate.go` / `serve_conscious.go` | gateway ack bytes, APPC offsets, the ping dance |
+| `internal/fastser/fastser.go` | `charTag` 0x43, `charFlag` 0x80 (the fast-ser character field); single-byte length cap 255 |
+| `internal/cpic/cpic.go` (ported) | the RFCPRO tag constants the response tags above reference (`TagSession` 0x0514, `TagCallContext` 0x0512, `TagRequestedOutput` 0x0205, …) |
+
+The S4 extension tags (0x0104, 0x0331/0333/0334/0335/0336) are tolerated in
+`internal/cpic/function.go` (envelope) and parsed in
+`internal/classicrfc/classicrfc.go` (data); both are annotated there.
+
+Provenance for every value is the live-capture diff recorded in
+[0001](0001-live-type3-server.md) and the `/tmp/gold-*.jsonl` captures — none of
+it is from SAP documentation.

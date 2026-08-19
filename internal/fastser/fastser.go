@@ -17,7 +17,8 @@
 package fastser
 
 // charTag, charFlag frame one character field: tag 0x43 ('C'), a one-byte
-// length, the flag 0x80, then that many ASCII value bytes.
+// length, the flag 0x80, then that many ASCII value bytes. See
+// docs/discoveries/0002-wire-constants.md.
 const (
 	charTag  = 0x43
 	charFlag = 0x80
@@ -54,7 +55,7 @@ func DecodeCharFields(payload []byte) []CharField {
 // value must be at most 255 bytes; longer values are truncated to the length the
 // single-byte length field can express (callers should split beforehand).
 func EncodeCharField(value []byte) []byte {
-	if len(value) > 0xff {
+	if len(value) > 0xff { // the length field is a single byte: max 255
 		value = value[:0xff]
 	}
 	out := make([]byte, 0, 3+len(value))

@@ -26,6 +26,8 @@ var KnownGoodPingResponse, _ = hex.DecodeString(
 		"20002000200020002000200020000130066700080000000000606c40" +
 		"0667ffff0000ffff")
 
+// Wire constants used below are explained in docs/discoveries/0002-wire-constants.md.
+//
 // ServeGenerate answers one live SAP RFC client as our own server. It replays a
 // proven-good handshake (echo the 64-byte gateway record, then send the recorded
 // CPIC logon-accept), then for every F_SAP_SEND function request it sends
@@ -49,13 +51,13 @@ func ServeGenerate(conn net.Conn, logonAccept, respCUT []byte, logf func(string)
 			return
 		}
 		switch {
-		case len(frame) == 64:
+		case len(frame) == gatewayRecordLen: // gateway normal-client record
 			// Gateway normal-client record: echo it back.
 			if err := t.Send(frame); err != nil {
 				return
 			}
 			log(fmt.Sprintf("C->S gateway 64B -> echoed"))
-		case len(frame) >= 2 && frame[0] == appc.ProtocolVersion && frame[1] == 0x03:
+		case len(frame) >= 2 && frame[0] == appc.ProtocolVersion && frame[1] == appcInit: // CPIC-init (logon)
 			// CPIC initialize + logon: reply with the recorded logon-accept.
 			if err := t.Send(logonAccept); err != nil {
 				return
@@ -63,8 +65,8 @@ func ServeGenerate(conn net.Conn, logonAccept, respCUT []byte, logf func(string)
 			log(fmt.Sprintf("C->S CPIC-init %dB -> logon-accept %dB", len(frame), len(logonAccept)))
 		case len(frame) >= 80 && frame[0] == appc.ProtocolVersion && frame[1] == byte(appc.FuncSapSend):
 			// F_SAP_SEND carrying a function request: answer with respCUT.
-			uid := binary.BigEndian.Uint16(frame[4:6])
-			convID := append([]byte(nil), frame[40:48]...)
+			uid := binary.BigEndian.Uint16(frame[appcUIDOffset:])                    // APPC header uid (BE)
+			convID := append([]byte(nil), frame[appcConvOffset:appcConvOffset+8]...) // 8-byte conversation id
 			resp, werr := wrapFSapSend(respCUT, convID, uid)
 			if werr != nil {
 				log("wrap error: " + werr.Error())
