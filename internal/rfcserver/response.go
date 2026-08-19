@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
 )
 
@@ -109,7 +110,17 @@ func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, guid
 			fields = append(fields, cpic.Field{Tag: uint16(cpic.TagTableCompr), Value: append([]byte(nil), row...)})
 		}
 	}
-	fields = append(fields, cpic.Field{Tag: uint16(cpic.TagEnd), Value: nil})
+	// Trailing S4 envelope: program name, control metric, S4 metadata block.
+	program, err := classicrfc.EncodeAbapChar("OPEN_RFC_GO", 40)
+	if err != nil {
+		return nil, err
+	}
+	fields = append(fields,
+		cpic.Field{Tag: uint16(cpic.TagProgram), Value: program},
+		cpic.Field{Tag: 0x0667, Value: append([]byte(nil), s4Metric0667...)},
+		cpic.Field{Tag: 0x0104, Value: append([]byte(nil), s4Meta0104...)},
+		cpic.Field{Tag: uint16(cpic.TagEnd), Value: nil},
+	)
 
 	chain, err := cpic.EncodeFieldChain(uint16(cpic.TagResponseStart), fields, cpic.FieldChainLimits{})
 	if err != nil {
