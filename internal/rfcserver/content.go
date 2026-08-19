@@ -32,8 +32,12 @@ type scriptStep struct {
 // script per function name (which may include server->client callbacks).
 type Templates struct {
 	gateway []byte
-	accepts map[int][]byte
-	funcs   map[string][]scriptStep
+	accepts map[int][]byte          // init length -> logon-accept
+	funcs   map[string][]scriptStep // "acceptLen|FUNCTION" -> reply script
+}
+
+func funcKey(acceptLen int, name string) string {
+	return fmt.Sprintf("%d|%s", acceptLen, name)
 }
 
 type capRow struct {
@@ -47,77 +51,88 @@ type capRow struct {
 // length), and — after each decoded function request — the frames up to the next
 // request as that function's script (server frames are sends, client frames are
 // callback receives).
-func LoadTemplates(path, label string) (*Templates, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var frames [][2]interface{} // (dir, payload)
+func LoadTemplates(paths []string, label string) (*Templates, error) {
+	t := &Templates{accepts: map[int][]byte{}, funcs: map[string][]scriptStep{}}
 	type fr struct {
 		dir string
 		b   []byte
 	}
-	var seq []fr
-	dec := json.NewDecoder(bytes.NewReader(data))
-	for {
-		var r capRow
-		if dec.Decode(&r) != nil {
-			break
-		}
-		if r.Hex == "" || (label != "" && r.Label != label) {
-			continue
-		}
-		b, err := hex.DecodeString(r.Hex)
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		seq = append(seq, fr{r.Dir, b})
-	}
-	_ = frames
-	t := &Templates{accepts: map[int][]byte{}, funcs: map[string][]scriptStep{}}
-	for i := 0; i < len(seq); i++ {
-		f := seq[i]
-		switch {
-		case f.dir == "S->C" && len(f.b) == 64 && t.gateway == nil:
-			t.gateway = f.b
-		case f.dir == "C->S" && isInit(f.b):
-			// the next S->C F_SAP_SEND is this init's accept
-			for j := i + 1; j < len(seq); j++ {
-				if seq[j].dir == "S->C" && isFSapSend(seq[j].b) {
-					if _, ok := t.accepts[len(f.b)]; !ok {
-						t.accepts[len(f.b)] = seq[j].b
-					}
-					break
-				}
+		var seq []fr
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for {
+			var r capRow
+			if dec.Decode(&r) != nil {
+				break
 			}
-		case f.dir == "C->S" && isFuncRequest(f.b):
-			req, err := DecodeCutFunctionRequest(f.b[80:])
+			if r.Hex == "" || (label != "" && r.Label != label) {
+				continue
+			}
+			b, err := hex.DecodeString(r.Hex)
 			if err != nil {
 				continue
 			}
-			if _, ok := t.funcs[req.FunctionName]; ok {
-				continue // keep the first (representative) script
-			}
-			var script []scriptStep
-			for j := i + 1; j < len(seq); j++ {
-				nb := seq[j].b
-				if seq[j].dir == "C->S" && (isFuncRequest(nb) || isInit(nb)) {
-					break
+			seq = append(seq, fr{r.Dir, b})
+		}
+		curAccept := 0 // length of the accept currently in effect (the session mode)
+		for i := 0; i < len(seq); i++ {
+			f := seq[i]
+			switch {
+			case f.dir == "S->C" && len(f.b) == 64 && t.gateway == nil:
+				t.gateway = f.b
+			case f.dir == "C->S" && isInit(f.b):
+				for j := i + 1; j < len(seq); j++ {
+					if seq[j].dir == "S->C" && isFSapSend(seq[j].b) {
+						if _, ok := t.accepts[len(f.b)]; !ok {
+							t.accepts[len(f.b)] = seq[j].b
+						}
+						curAccept = len(seq[j].b)
+						break
+					}
 				}
-				if len(nb) == 8 { // NI keepalive is not part of a function script
+			case f.dir == "C->S" && isFuncRequest(f.b):
+				req, err := DecodeCutFunctionRequest(f.b[80:])
+				if err != nil {
 					continue
 				}
-				if seq[j].dir == "S->C" && isFSapSend(nb) {
-					script = append(script, scriptStep{send: true, payload: nb})
-				} else if seq[j].dir == "C->S" && isFSapSend(nb) && len(nb) > 80 {
-					script = append(script, scriptStep{send: false, payload: nb}) // callback receive
+				key := funcKey(curAccept, req.FunctionName)
+				if _, ok := t.funcs[key]; ok {
+					continue
 				}
+				var script []scriptStep
+				for j := i + 1; j < len(seq); j++ {
+					nb := seq[j].b
+					if seq[j].dir == "C->S" && (isFuncRequest(nb) || isInit(nb)) {
+						break
+					}
+					if len(nb) == 8 {
+						continue
+					}
+					if seq[j].dir == "S->C" && isFSapSend(nb) {
+						script = append(script, scriptStep{send: true, payload: nb})
+					} else if seq[j].dir == "C->S" && isFSapSend(nb) && len(nb) > 80 {
+						script = append(script, scriptStep{send: false, payload: nb})
+					}
+				}
+				t.funcs[key] = script
 			}
-			t.funcs[req.FunctionName] = script
 		}
 	}
 	if t.gateway == nil || len(t.accepts) == 0 {
-		return nil, fmt.Errorf("capture has no gateway reply or logon-accept (label %q)", label)
+		return nil, fmt.Errorf("captures have no gateway reply or logon-accept (label %q)", label)
+	}
+	// Seed the baked handshake accepts so this endpoint also serves the SM59
+	// Connection Test (init 1818B -> 817B) and Unicode Test (1444B -> 1079B),
+	// which a program-only capture may not contain.
+	if _, ok := t.accepts[1818]; !ok {
+		t.accepts[1818] = smartAccept
+	}
+	if _, ok := t.accepts[1444]; !ok {
+		t.accepts[1444] = smartAcceptUni
 	}
 	return t, nil
 }
@@ -164,6 +179,7 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 	tr := transport.New(conn, transport.Options{})
 	ctx := context.Background()
 	var convID, guid []byte
+	mode := 0 // length of the accept in effect this session (selects the reply set)
 	pingStep := 0
 	for {
 		got, err := tr.Receive(ctx)
@@ -192,19 +208,20 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 			if tr.Send(acc) != nil {
 				return
 			}
+			mode = len(acc)
 			pingStep = 0
-			log(fmt.Sprintf("LOGON: init=%dB accept=%dB (conv=%s)", len(got), len(acc), string(convID)))
+			log(fmt.Sprintf("LOGON: init=%dB accept=%dB mode=%d (conv=%s)", len(got), len(acc), mode, string(convID)))
 		case isFuncRequest(got):
 			req, derr := DecodeCutFunctionRequest(got[80:])
 			fn := "?"
 			if derr == nil {
 				fn = req.FunctionName
 			}
-			if script, ok := t.funcs[fn]; ok {
+			if script, ok := t.funcs[funcKey(mode, fn)]; ok {
 				if !runScript(tr, ctx, script, convID, guid, log) {
 					return
 				}
-				log(fmt.Sprintf("SESSION: %s answered (%d step script)", fn, len(script)))
+				log(fmt.Sprintf("SESSION: %s answered (mode=%d, %d step script)", fn, mode, len(script)))
 			} else if fn == "RFC_PING" {
 				resp := patchSession(smartPingSteps[pingStep%len(smartPingSteps)], convID, guid)
 				if tr.Send(resp) != nil {

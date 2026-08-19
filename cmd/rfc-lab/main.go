@@ -158,7 +158,7 @@ func main() {
 
 	// type 3 (content-addressed): match each request to a recorded reply script.
 	if *program != "" {
-		tmpl, err := rfcserver.LoadTemplates(*program, "gw")
+		tmpl, err := rfcserver.LoadTemplates(strings.Split(*program, ","), "gw")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "rfc-lab: -program:", err)
 			os.Exit(1)
