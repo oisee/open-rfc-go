@@ -23,3 +23,10 @@ const (
 	cutReqTag1 = 0x02 // CUT request prefix byte 1 (0x00 for a response)
 	cutRespT1  = 0x00 // CUT response prefix byte 1
 )
+
+// Additional framing constants; see docs/discoveries/0002-wire-constants.md.
+const (
+	niKeepaliveLen = 8   // an NI_PING/NI_PONG keepalive record is exactly 8 bytes
+	initMinLen     = 200 // heuristic floor distinguishing a CPIC-init from a small control record
+	cutPrefixLen   = 4   // CUT request/response prefix length (e.g. 05 02 00 00)
+)

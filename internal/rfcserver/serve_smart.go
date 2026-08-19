@@ -91,6 +91,7 @@ func ServeSmart(conn net.Conn, logf func(string)) {
 			return
 		}
 		switch {
+		// Wire constants: see docs/discoveries/0002-wire-constants.md.
 		case len(got) == 64: // CONNECT: gateway normal-client record
 			reply := append([]byte(nil), got...)
 			reply[29] = 0x0f // protocol level accepted

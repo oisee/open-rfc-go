@@ -123,7 +123,7 @@ func main() {
 		}
 		a := Annotation{Dir: fr.Dir, Index: fr.Index, Len: fr.Len}
 
-		if !seenGateway[fr.Dir] && fr.Len == 64 {
+		if !seenGateway[fr.Dir] && fr.Len == 64 { // 64-byte gateway normal-client record; see docs/discoveries/0002-wire-constants.md
 			seenGateway[fr.Dir] = true
 			a.Layer = "gateway"
 			a.Gateway = describeGateway(payload)
@@ -249,7 +249,7 @@ func trimField(b []byte) string {
 
 func describeMessage(data []byte, showValues bool) *CUTView {
 	switch {
-	case hasPrefix(data, []byte{0x05, 0x02, 0x00, 0x00}):
+	case hasPrefix(data, []byte{0x05, 0x02, 0x00, 0x00}): // CUT request prefix
 		req, err := rfcserver.DecodeCutFunctionRequest(data)
 		if err != nil {
 			return &CUTView{Kind: "error", Function: "CUT request", Error: err.Error()}
@@ -262,7 +262,7 @@ func describeMessage(data []byte, showValues bool) *CUTView {
 			c.Tables = append(c.Tables, TableView{Name: t.Name, Rows: len(t.Rows), RowSize: t.RowByteLength})
 		}
 		return c
-	case hasPrefix(data, []byte{0x05, 0x00, 0x00, 0x00}):
+	case hasPrefix(data, []byte{0x05, 0x00, 0x00, 0x00}): // CUT response prefix
 		decoded, err := cpic.DecodeFunctionResultFields(data)
 		if err != nil {
 			return &CUTView{Kind: "error", Function: "CUT response", Error: err.Error()}

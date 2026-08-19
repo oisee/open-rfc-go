@@ -16,8 +16,9 @@ import (
 )
 
 // niPing and niPong are the 8-byte NI keepalive frames ("NI_PING\0"/"NI_PONG\0").
-var niPing = mustHex("4e495f50494e4700")
-var niPong = mustHex("4e495f504f4e4700")
+// NI_PING / NI_PONG keepalive records; see docs/discoveries/0002-wire-constants.md.
+var niPing = mustHex("4e495f50494e4700") // "NI_PING\0"
+var niPong = mustHex("4e495f504f4e4700") // "NI_PONG\0"
 
 // scriptStep is one step of a function's recorded reply script: a frame to send
 // to the client (send=true) or one to expect and consume from it (a callback
@@ -82,7 +83,7 @@ func LoadTemplates(paths []string, label string) (*Templates, error) {
 		for i := 0; i < len(seq); i++ {
 			f := seq[i]
 			switch {
-			case f.dir == "S->C" && len(f.b) == 64 && t.gateway == nil:
+			case f.dir == "S->C" && len(f.b) == gatewayRecordLen && t.gateway == nil:
 				t.gateway = f.b
 			case f.dir == "C->S" && isInit(f.b):
 				for j := i + 1; j < len(seq); j++ {
@@ -95,7 +96,7 @@ func LoadTemplates(paths []string, label string) (*Templates, error) {
 					}
 				}
 			case f.dir == "C->S" && isFuncRequest(f.b):
-				req, err := DecodeCutFunctionRequest(f.b[80:])
+				req, err := DecodeCutFunctionRequest(f.b[appcHeaderLen:])
 				if err != nil {
 					continue
 				}
@@ -109,12 +110,12 @@ func LoadTemplates(paths []string, label string) (*Templates, error) {
 					if seq[j].dir == "C->S" && (isFuncRequest(nb) || isInit(nb)) {
 						break
 					}
-					if len(nb) == 8 {
+					if len(nb) == niKeepaliveLen { // skip NI keepalives inside a function script
 						continue
 					}
 					if seq[j].dir == "S->C" && isFSapSend(nb) {
 						script = append(script, scriptStep{send: true, payload: nb})
-					} else if seq[j].dir == "C->S" && isFSapSend(nb) && len(nb) > 80 {
+					} else if seq[j].dir == "C->S" && isFSapSend(nb) && len(nb) > appcHeaderLen {
 						script = append(script, scriptStep{send: false, payload: nb})
 					}
 				}
@@ -137,10 +138,16 @@ func LoadTemplates(paths []string, label string) (*Templates, error) {
 	return t, nil
 }
 
-func isInit(b []byte) bool     { return len(b) > 200 && b[0] == 0x06 && b[1] == 0x03 }
-func isFSapSend(b []byte) bool { return len(b) >= 80 && b[0] == 0x06 && b[1] == 0xcb }
+// isInit / isFSapSend / isFuncRequest classify APPC records by protocol version
+// (byte 0), function code (byte 1), and the CUT prefix at the payload start; see
+// docs/discoveries/0002-wire-constants.md.
+func isInit(b []byte) bool { return len(b) > initMinLen && b[0] == appcProtocol && b[1] == appcInit }
+func isFSapSend(b []byte) bool {
+	return len(b) >= appcHeaderLen && b[0] == appcProtocol && b[1] == appcFSapSend
+}
 func isFuncRequest(b []byte) bool {
-	return len(b) > 84 && b[0] == 0x06 && b[1] == 0xcb && b[80] == 0x05 && b[81] == 0x02
+	return len(b) > appcHeaderLen+cutPrefixLen && b[0] == appcProtocol && b[1] == appcFSapSend &&
+		b[appcHeaderLen] == cutReqTag0 && b[appcHeaderLen+1] == cutReqTag1
 }
 
 // acceptForLen returns the accept whose captured init length is closest to n.
@@ -188,7 +195,7 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 			return
 		}
 		switch {
-		case len(got) == 64:
+		case len(got) == gatewayRecordLen: // CONNECT: gateway normal-client record
 			reply := append([]byte(nil), got...)
 			reply[gatewayAckOffset1] = gatewayAckLevel
 			reply[gatewayAckOffset2] = gatewayAckCaps
@@ -196,13 +203,13 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 				return
 			}
 			log("CONNECT: gateway acknowledged")
-		case len(got) == 8 && bytes.Equal(got, niPing):
+		case len(got) == niKeepaliveLen && bytes.Equal(got, niPing):
 			if tr.Send(niPong) != nil {
 				return
 			}
-		case len(got) == 8: // NI_PONG or other keepalive — no reply
+		case len(got) == niKeepaliveLen: // NI_PONG or other keepalive — no reply
 		case isInit(got):
-			convID = append([]byte(nil), got[40:48]...)
+			convID = append([]byte(nil), got[appcConvOffset:appcConvOffset+8]...)
 			guid = findRFCGUID(got)
 			acc := patchSession(t.acceptForLen(len(got)), convID, guid)
 			if tr.Send(acc) != nil {
@@ -212,7 +219,7 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 			pingStep = 0
 			log(fmt.Sprintf("LOGON: init=%dB accept=%dB mode=%d (conv=%s)", len(got), len(acc), mode, string(convID)))
 		case isFuncRequest(got):
-			req, derr := DecodeCutFunctionRequest(got[80:])
+			req, derr := DecodeCutFunctionRequest(got[appcHeaderLen:])
 			fn := "?"
 			if derr == nil {
 				fn = req.FunctionName
@@ -262,7 +269,7 @@ func runScript(tr *transport.Transport, ctx context.Context, script []scriptStep
 
 func uidOf(frame []byte) uint16 {
 	if len(frame) >= 6 {
-		return uint16(frame[4])<<8 | uint16(frame[5])
+		return uint16(frame[appcUIDOffset])<<8 | uint16(frame[appcUIDOffset+1]) // uid, BE
 	}
 	return 0xffff
 }
