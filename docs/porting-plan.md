@@ -18,7 +18,7 @@ and `context.Context`; and about 7k (`src/compat/`) is dropped outright.
 | 1 | NI framing | `src/protocol/ni.ts` | **done** |
 | 2 | APPC records, CPIC field chains, RFCPRO field headers, gateway handshake | `src/protocol/{appc,cpic,rfcpro,gateway}.ts` (+ `bytes`, `password-scramble`, `rfc-error-envelope`) | **done** |
 | 3a | Scalar value codecs: packed decimal, decimal float, temporal, unicode-scalar | `src/values/{packed-decimal,decimal-float,classic-temporal,unicode-scalar}.ts` | **done** |
-| 3b | Structure & xRFC codecs (classic-structure, classic-xrfc, recursive xRFC) | `src/values/{classic-structure,classic-xrfc,recursive-*}.ts` | after M4 (they depend on `metadata/` and `protocol/classic-rfc`) |
+| 3b | Structure & xRFC codecs (classic-structure, classic-xrfc, recursive xRFC) | `src/values/{classic-structure,classic-xrfc,recursive-*}.ts` | flat structures + tables **done & verified live** (STFC_STRUCTURE, RFC_SYSTEM_INFO); deep/nested xRFC (STFC_DEEP_*) remains |
 | 4 | Metadata decoders: `RFC_METADATA_GET`, `DDIF_FIELDINFO`, function/structure interface (+ `classic-rfc`) | `src/metadata/{recursive-metadata,recursive-parameter-index,rfc-function-interface,rfc-structure-definition,ddif-fieldinfo,rfc-metadata-get}.ts`, `src/protocol/classic-rfc.ts` | **done** |
 | 5 | Transport over `net.Conn`; first live `STFC_CONNECTION` | `src/transport/ni-socket.ts`, `src/client/direct-cpic-session.ts` | **done** (live call verified 2026-08-19 against A4H, kernel 758) |
 | 6 | Pool, session contexts, transactions, SAProuter, SOCKS5 | `src/pool/`, `src/lifecycle/`, `src/transport/` | |
@@ -45,6 +45,15 @@ port is the **gateway**, and the classic-RFC server returns **only the export
 and table parameters the client names in "requested outputs"** — a call that
 lists none gets back control fields and no parameter data. See
 `internal/client/live_test.go` (guarded by `OPEN_RFC_LIVE=1`).
+
+On the same day the runtime metadata path was exercised live end to end: the
+client discovers a function's interface (`RFC_GET_FUNCTION_INTERFACE`) and a
+structure's layout (`RFC_GET_STRUCTURE_DEFINITION`) at runtime, then encodes a
+structure import and decodes both the echoed structure export and the returned
+table rows — no interface hardcoded. Proven against `RFC_SYSTEM_INFO` (RFCSI
+export) and `STFC_STRUCTURE` (RFCTEST import/export + RFCTABLE). See
+`internal/client/live_explore_test.go`. Deep/nested xRFC (`STFC_DEEP_TABLE`,
+`STFC_DEEP_STRUCTURE`) is the remaining M3b work.
 
 ## Definition of done for a milestone
 

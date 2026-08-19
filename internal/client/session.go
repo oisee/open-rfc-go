@@ -497,6 +497,25 @@ func (s *Session) Call(ctx context.Context, functionName string, imports []cpic.
 	return CallResult{Success: decoded.Success, Fields: decoded.Fields}, nil
 }
 
+// CallRaw sends a pre-built classic-RFC (CUT) request and returns the decoded
+// application result fields. It is the low-level entry the metadata builders in
+// internal/metadata target: they produce request bytes, and callers pass the
+// resulting fields to the matching decoder.
+func (s *Session) CallRaw(ctx context.Context, request []byte) (CallResult, error) {
+	if !s.authenticated {
+		return CallResult{}, fmt.Errorf("%w: session must be authenticated before a call", ErrSession)
+	}
+	response, err := s.exchange(ctx, request)
+	if err != nil {
+		return CallResult{}, err
+	}
+	decoded, err := cpic.DecodeFunctionResultFields(response)
+	if err != nil {
+		return CallResult{}, err
+	}
+	return CallResult{Success: decoded.Success, Fields: decoded.Fields}, nil
+}
+
 // CallSTFCConnection invokes STFC_CONNECTION with REQUTEXT and returns ECHOTEXT.
 // It is the canonical smoke-test call: the echo must equal the request.
 func (s *Session) CallSTFCConnection(ctx context.Context, requtext string) (echo string, resp string, err error) {
