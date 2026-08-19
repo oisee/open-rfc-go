@@ -128,3 +128,21 @@ Open questions to settle before this is more than an idea: how a forwarded call
 maps local ABAP values to this client's typed parameters, how errors and
 exceptions round-trip across the boundary, and how stateful sessions / commit
 units behave when some calls are local and some remote.
+
+
+## Design notes & research tracks
+
+Beyond the milestone port, these design docs record where the project can go and
+how it plugs into the wider SDK-free SAP toolchain:
+
+- `docs/roadmap.md` — ranked roadmap (P0: public `rfc` package + typed ABAP
+  errors + error taxonomy; P1: metadata cache, codegen, observability, dial-path
+  wiring, deep-xRFC live proof).
+- `docs/mcp-rfc-bridge.md` — an MCP→RFC bridge (v1 fixed tools, v2 dynamic), and
+  its integration with [vsp](https://github.com/oisee/vibing-steampunk) (ADT↔MCP)
+  and odata_mcp_go (OData↔MCP) as the third, RFC transport.
+- `docs/rfc-assistance.md` — AI-assisted SAP debugging over classic RFC
+  (diagnostic surfaces, an agentic triage loop, safety, library additions).
+- `docs/polyglot-rfc-server.md` — expose *any* external library (Python/C/Rust/
+  Swift/Go) to ABAP by generating an RFC server plus ABAP proxy FM/interface+class
+  wrappers, deployed via vsp. Sits on the milestone-6 RFC-server track.
