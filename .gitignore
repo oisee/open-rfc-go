@@ -14,3 +14,4 @@ testdata/fuzz/
 /rfc-sniffer
 *.jsonl
 /captures/
+/rfc-server
