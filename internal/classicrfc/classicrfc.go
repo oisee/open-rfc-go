@@ -448,6 +448,13 @@ func decodeResult(fields []cpic.Field, borrow bool) (Result, error) {
 				Name: name, DeclaredRowByteLength: header.DeclaredRowByteLength, RowByteLength: rowByteLength,
 				RowEncoding: rowEncoding, RowCompression: rowCompression, Rows: rows,
 			})
+		case 0x0104:
+			// S/4HANA classic-serialization trailing annotation on scalar/structure
+			// exports; the actual values are in the classic 0x02xx fields, so this
+			// is skipped. The 0x033x table family (0x0331/0333/0334/0335/0336) is a
+			// distinct S4 table serialization not yet modelled — it falls through to
+			// the unsupported-tag error below. An open-rfc-go extension, beyond
+			// upstream open-rfc's classic (non-S4) scope.
 		default:
 			return zero, fmt.Errorf("%w: classic RFC response contains unsupported tag 0x%04x", ErrProtocol, field.Tag)
 		}
