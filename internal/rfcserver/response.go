@@ -81,8 +81,12 @@ func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, guid
 	}
 	fields = append(fields, cpic.Field{Tag: 0x0420, Value: []byte{0, 0, 0, 0}})
 	fields = append(fields, cpic.Field{Tag: uint16(cpic.TagCallContext), Value: nil})
-	for _, out := range requestedOutputs {
-		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagRequestedOutput), Value: encodeUTF16LE(out)})
+	// 0x0205 echoes only the outputs actually returned — the export names — not
+	// the caller's full requested-output list (which also names imports). Echoing
+	// an output with no matching value makes the client look for a missing param.
+	_ = requestedOutputs
+	for _, e := range exports {
+		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagRequestedOutput), Value: encodeUTF16LE(e.Name)})
 	}
 	for _, e := range exports {
 		name, err := encodeName(e.Name)
