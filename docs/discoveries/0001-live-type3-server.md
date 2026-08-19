@@ -231,3 +231,20 @@ dance and a replayed table's multiref collides across contexts; Connection Test
 works on the smart (sys 11) and replay (sys 10) endpoints. Next: a meaningful
 fast-ser codec (generate responses from values, resolving multiref per session)
 and, on top, real Go/JS function implementations behind a bridge adapter.
+
+## Update — mode-aware responder: every SM59 test + the program, one endpoint
+
+The response depends on the **serialization mode negotiated at logon**, not just
+the function name. Measured: the SM59 **Fast Serialization Test** logs on with
+init 1394/1423B -> accept 811/834B and gets RFC_PING=469B, RFC_SYSTEM_INFO=1147B —
+different bytes from the normal path (accept 807B, RFC_SYSTEM_INFO=746B) for the
+*same* functions. So the responder keys reply scripts by "acceptLen|FUNCTION" (the
+accept in effect = the mode) and ingests several captures at once.
+
+Result: a single endpoint (rfc-lab sys 12) now answers, all green from our Go —
+**Connection Test, Unicode Test, Fast Serialization Test, and the full
+ZLOCAL_RFC_TEST program** — across three serialization modes (807 normal, 811/834
+fast-ser, 817/1079 handshake tests). Step 1 (addressable content) is complete for
+the observed surface. Remaining: a real fast-ser codec that generates these
+responses from values (so it works for inputs we never captured) and, on top,
+real Go/JS function implementations behind a bridge adapter.
