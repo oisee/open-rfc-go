@@ -102,9 +102,8 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 // Real deployments register their own handlers — the base for the polyglot bridge.
 func DefaultDispatcher() *Dispatcher {
 	d := NewDispatcher()
-	d.Handle("RFC_PING", func(ctx context.Context, req Request) (Response, error) {
-		return Response{}, nil
-	})
+	// RFC_PING is intentionally left unregistered so ServeConscious answers it with
+	// the proven ping dance; STFC_CONNECTION exercises the generated path.
 	d.Handle("STFC_CONNECTION", func(ctx context.Context, req Request) (Response, error) {
 		var echo []byte
 		for _, imp := range req.Imports {
