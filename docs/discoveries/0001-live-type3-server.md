@@ -248,3 +248,29 @@ fast-ser, 817/1079 handshake tests). Step 1 (addressable content) is complete fo
 the observed surface. Remaining: a real fast-ser codec that generates these
 responses from values (so it works for inputs we never captured) and, on top,
 real Go/JS function implementations behind a bridge adapter.
+
+## Step 2 kickoff — the fast-ser payload is decodable (tag 0x5001)
+
+Feeding a real RFC_SYSTEM_INFO response to the classic decoder gets past the
+framing, GUID (0x0514) and success control (0x0420) but stops at an unknown tag
+**0x5001** — the fast-serialization parameter container — plus an extra 8-byte
+trailer after `ffff0000ffff`. Decoding a 0x5001 block by hand cracked the format:
+
+```
+0x5001 <len:2>
+  "<PARAM_NAME>"            ASCII, e.g. RFCSI_EXPORT
+  <field descriptor table>  0006 06LL … (per-field type/length)
+  <field values>, each:  0x43 <len:1> 0x80 <value>   (char field, ASCII value)
+```
+
+Verified against live bytes: `43 03 80 "A4H"` (RFCSYSID), `43 11 80
+"vhcala4hci_A4H_00"` (RFCDEST, len 0x11), `43 0a 80 "172.17.0.3"` (RFCIPADDR),
+`43 05 80 "Linux"` (RFCOPSYS), `43 03 80 "793"` (RFCKERNRL), `43 03 80 "HDB"`.
+Values are ASCII here, not UTF-16LE. A second 0x5001 block carries the program
+context ("SAPLSRFC…").
+
+So a meaningful codec is tractable: to generate a response, emit `param name +
+descriptors + (0x43 len 0x80 value) per field`, wrap in 0x5001, and add the
+success/GUID framing. Remaining to map: the descriptor table's exact grammar,
+the non-char type markers, table (multi-row) encoding, and the trailing 8 bytes
+(`0000 <len?> 0000 6d60`). This is the concrete Step 2 work — no longer opaque.
