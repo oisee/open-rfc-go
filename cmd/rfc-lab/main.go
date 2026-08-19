@@ -48,6 +48,7 @@ func main() {
 	replayLabel := flag.String("replay-label", "gw", "only replay frames captured under this label")
 	oracle := flag.String("oracle", "", "capture whose handshake seeds our generating type-3 server (port 3310)")
 	oracleConn := flag.Int("oracle-conn", 1, "1-based connection in -oracle to take the handshake from")
+	program := flag.String("program", "", "capture to build the content-addressed responder from (port 3312)")
 	flag.Parse()
 
 	fmt.Fprintln(os.Stderr, "rfc-lab: captures can contain credentials — do not commit or share the dump file.")
@@ -154,6 +155,21 @@ func main() {
 		role:   "our state-machine type-3 server (generates logon-accept + RFC_PING)",
 		run:    func() error { return serveSmartLoop(ctx, "0.0.0.0:3311") },
 	})
+
+	// type 3 (content-addressed): match each request to a recorded reply script.
+	if *program != "" {
+		tmpl, err := rfcserver.LoadTemplates(*program, "gw")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rfc-lab: -program:", err)
+			os.Exit(1)
+		}
+		eps = append(eps, endpoint{
+			typ:    "3(prog)",
+			listen: "0.0.0.0:3312",
+			role:   "content-addressed responder (from " + *program + ")",
+			run:    func() error { return serveContentLoop(ctx, "0.0.0.0:3312", tmpl) },
+		})
+	}
 
 	fmt.Println("rfc-lab: endpoints — point each SM59 destination's target at this box:")
 	for _, e := range eps {
@@ -277,6 +293,26 @@ func serveReplayLoop(ctx context.Context, listen string, script []rfcserver.Repl
 		}
 		fmt.Printf("rfc-lab[type T]: client %s\n", conn.RemoteAddr())
 		go rfcserver.ServeReplay(conn, script, func(s string) { fmt.Println("  [type T] " + s) })
+	}
+}
+
+func serveContentLoop(ctx context.Context, listen string, tmpl *rfcserver.Templates) error {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", listen)
+	if err != nil {
+		return err
+	}
+	go func() { <-ctx.Done(); _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		fmt.Printf("rfc-lab[prog]: client %s\n", conn.RemoteAddr())
+		go rfcserver.ServeContentAddressed(conn, tmpl, func(s string) { fmt.Println("  [prog] " + s) })
 	}
 }
 
