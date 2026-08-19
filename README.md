@@ -15,8 +15,10 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 > | rc=0 | rc=0 · A4H | rc=0 · echo + callback | rc=0 · struct+table | rc=0 · 17×2 | rc=0 |
 >
 > A single Go endpoint answers **every SM59 test button green** — Connection Test,
-> Unicode Test, Fast Serialization Test — across three serialization modes. The
-> **client** leg is live-proven too. → the wire story: [`docs/discoveries/0001`](docs/discoveries/0001-live-type3-server.md)
+> Unicode Test, Fast Serialization Test — across three serialization modes. And
+> open-rfc-go now **decodes S/4HANA classic responses end to end** — scalars and
+> tables alike (real T000 rows, field lists, structures) — pure Go. The **client**
+> leg is live-proven too. → the wire story: [`docs/discoveries/0001`](docs/discoveries/0001-live-type3-server.md)
 
 > ⚠️ **Research preview.** No release, no stable API, no support boundary. Classic
 > RFC has no transport encryption — don't send credentials across an untrusted
@@ -67,7 +69,8 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 |---|---|
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies) |
-| **Next** | a fast-ser codec that generates responses from values, then Go/JS functions behind a bridge |
+| **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
+| **Next** | a server that *generates* responses from values (dispatch), then Go/JS functions behind a polyglot bridge |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md).
 

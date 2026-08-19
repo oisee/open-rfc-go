@@ -171,6 +171,15 @@ func main() {
 		})
 	}
 
+	// type 3 (conscious): GENERATE responses from Go handlers (needs SM59
+	// Serializer = Classic serializer). The base for the polyglot bridge.
+	eps = append(eps, endpoint{
+		typ:    "3(gen)",
+		listen: "0.0.0.0:3313",
+		role:   "conscious server — generates classic responses via handlers",
+		run:    func() error { return serveConsciousLoop(ctx, "0.0.0.0:3313") },
+	})
+
 	fmt.Println("rfc-lab: endpoints — point each SM59 destination's target at this box:")
 	for _, e := range eps {
 		fmt.Printf("  type %-4s  %-16s  %s\n", e.typ, e.listen, e.role)
@@ -293,6 +302,27 @@ func serveReplayLoop(ctx context.Context, listen string, script []rfcserver.Repl
 		}
 		fmt.Printf("rfc-lab[type T]: client %s\n", conn.RemoteAddr())
 		go rfcserver.ServeReplay(conn, script, func(s string) { fmt.Println("  [type T] " + s) })
+	}
+}
+
+func serveConsciousLoop(ctx context.Context, listen string) error {
+	d := rfcserver.DefaultDispatcher()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", listen)
+	if err != nil {
+		return err
+	}
+	go func() { <-ctx.Done(); _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		fmt.Printf("rfc-lab[gen]: client %s\n", conn.RemoteAddr())
+		go rfcserver.ServeConscious(conn, d, func(s string) { fmt.Println("  [gen] " + s) })
 	}
 }
 
