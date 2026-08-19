@@ -6,3 +6,6 @@ coverage.txt
 
 # Fuzz corpus entries found locally; committed only with a regression test
 testdata/fuzz/
+
+# Local SAP MCP config — contains live credentials, never commit
+.mcp.json

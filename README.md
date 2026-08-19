@@ -308,8 +308,8 @@ network. See [`SECURITY.md`](SECURITY.md).
 | Milestone | Scope | State |
 |---|---|---|
 | 1 | NI framing | **done** |
-| 2 | Bounded byte reader, APPC, CPIC, RFCPRO, gateway | next |
-| 3 | Value codecs | |
+| 2 | Bounded byte reader, APPC, CPIC, RFCPRO, gateway | **done** |
+| 3 | Value codecs | next |
 | 4 | Metadata repository, `classic-rfc.ts` | |
 | 5 | Transport over `net.Conn`; first live `STFC_CONNECTION` | |
 | 6 | Pool, session contexts, transactions, SAProuter, SOCKS5 | |
