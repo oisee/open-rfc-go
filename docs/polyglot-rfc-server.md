@@ -93,6 +93,43 @@ deployment arm for the ABAP proxies this generator emits.
 - **Testability**: the same server, driven by the in-process peer (see the
   RFC-server track), gives offline end-to-end tests of the whole path.
 
+## Discovery & marshalling (the translator-interfacer)
+
+An exposed library must be both *callable* and *self-describing* over RFC, so a
+client can discover it at runtime without a pre-defined DDIC interface. The core
+is one language-neutral **interface descriptor (IR)** per exposed function:
+
+```
+FuncDescriptor{ Name string; Params []{ Name, Class (I|E|C|T), Type, Optional } }
+Type = scalar(exid,len) | structure(fields[]) | table(rowType)   // recursive
+```
+
+Built once, at registration time, from the target's own contract — a C header
+(cbindgen), Python type hints (`inspect`), a Go package (`go/types`), a
+protobuf/gRPC service, or an OpenAPI spec — or hand-declared in Go.
+
+Three pieces sit on top of the existing `Dispatcher`:
+
+1. **A registry** mapping each function name to its `FuncDescriptor` plus a
+   library adapter `func(ctx, map[string]any) (map[string]any, error)`.
+2. **Metadata handlers** — register handlers for `RFC_GET_FUNCTION_INTERFACE`,
+   `RFC_GET_STRUCTURE_DEFINITION`, and `RFC_METADATA_GET` that answer *from the
+   registry*. This is what makes the wrapper discoverable: any RFC client (this
+   project's client, PyRFC, node-rfc — and ABAP once its DDIC proxy is
+   generated) resolves the interface at runtime, SDK-free, with no predefined
+   DDIC. The new code here is the server-side **encoders** for the FUNINT /
+   FIELDS metadata rows — the mirror of the milestone-4 decoders.
+3. **An IR-driven marshaller** — decode each inbound CUT parameter (bytes →
+   native Go scalar/structure/table via `structure`/`xrfc`/`classicrfc`), call
+   the adapter, and encode the outputs back into a CUT response per the
+   descriptor. This is the **inverse of the milestone-7 client marshaller in
+   `rfc/call.go`**, so much of that logic is reused, not rewritten.
+
+So: registry (IR + adapters) + metadata encoders + IR marshaller + the existing
+`Dispatcher`. The ABAP-side DDIC proxy (FM / `ZIF_*` / `ZCL_*`) is generated
+from the *same* IR and deployed via vsp, but is optional — a generic RFC client
+discovers and calls the wrapper directly.
+
 ## Open questions / risks
 
 - **Type mapping fidelity** external ↔ ABAP: strings/encodings, decimals
