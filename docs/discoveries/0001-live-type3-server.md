@@ -337,3 +337,24 @@ FIELDS "MANDT/MTEXT/…"; STFC_STRUCTURE RFCTABLE with "A4H"). The remaining Ste
 work is to parse this 0x033x family into tables (both the S4-native 0x0333/0x0334
 form and the 0x0335+classic mixed form), then the encode side. Golds:
 /tmp/gold-classic-deltaoff.jsonl.
+
+## Step 2 — S/4HANA classic DECODE complete (scalars + tables)
+
+The 0x033x table family is now parsed, so the decode side of the S/4 classic
+path is done. Both forms extract, verified against live vectors
+(internal/classicrfc/testdata/s4_*.hex):
+
+- **mixed** — 0x0335 descriptor + classic 0x0302 header + 0x0303/0x0304 rows
+  (RFC_READ_TABLE): recovers the T000 rows ("…SAP SE…Walldorf") and the FIELDS
+  descriptions (MANDT, MTEXT, …).
+- **native** — 0x0333 descriptor + 0x0334 rows at fixed width (STFC_STRUCTURE):
+  recovers the RFCTABLE row.
+
+0x0331 (table id) and 0x0336 (trailer) are positional markers; table names are
+positional (S4TAB<id>) because the wire carries only ids — real names come from
+the request's table order. With Classic serializer + delta manager off, an S/4
+classic response now decodes end to end: envelope classify → scalars → tables.
+
+**Next:** the ENCODE side — a "conscious" smart server that GENERATES these
+responses from values (inverse of the decode above), then the polyglot RFC
+bridge (`docs/polyglot-rfc-server.md`).
