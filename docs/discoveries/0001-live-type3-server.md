@@ -205,3 +205,29 @@ captured response for it (patched with this session's tokens). For a fixed
 program with fixed inputs it works end to end without a fast-ser encoder — the
 original backlog idea, now feasible. The general one is true fast-ser Delta
 generation. Captures preserved at /tmp/gold-program.jsonl and /tmp/gold-params.jsonl.
+
+## MILESTONE — a real ABAP RFC program runs fully green against our Go server
+
+The content-addressed responder (`ServeContentAddressed`, rfc-lab system number
+12) makes the live `ZLOCAL_RFC_TEST` program complete **all six calls rc=0**
+answered by our Go — RFC_PING, RFC_SYSTEM_INFO, STFC_CONNECTION (with its
+server→client callback), STFC_STRUCTURE (structure), RFC_READ_TABLE (17 cols × 2
+rows), STFC_STRING:
+
+```
+RFC_PING rc=0; RFC_SYSTEM_INFO rc=0 sysid=A4H; STFC_CONNECTION rc=0 echo=...;
+STFC_STRUCTURE rc=0 rows=1; RFC_READ_TABLE rc=0 cols=17 rows=2; STFC_STRING rc=0
+```
+
+How: parse the capture into a gateway reply, init-length-keyed accepts, and a
+per-function reply script; service NI keepalives; on each request run the script
+with this session's tokens patched (conversation id + RFC GUID in both byte
+orders). Grounded in the measurement that a request is 98.6–99.1% fixed (only the
+GUID and a sequence byte vary), so patching a captured reply is sound.
+
+Known edge: the SM59 Connection Test against this program-tuned endpoint fails
+(`CALL_RFC_TABLE_MULTIREF` / RFCTAB40) because RFC_PING falls back to the baked
+dance and a replayed table's multiref collides across contexts; Connection Test
+works on the smart (sys 11) and replay (sys 10) endpoints. Next: a meaningful
+fast-ser codec (generate responses from values, resolving multiref per session)
+and, on top, real Go/JS function implementations behind a bridge adapter.
