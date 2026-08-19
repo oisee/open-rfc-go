@@ -15,3 +15,5 @@ testdata/fuzz/
 *.jsonl
 /captures/
 /rfc-server
+/rfc-lab
+/rfc-viewer

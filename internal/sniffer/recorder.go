@@ -12,6 +12,8 @@ import (
 // recordLine is one captured frame as JSON.
 type recordLine struct {
 	Dir   string `json:"dir"`
+	Conn  int    `json:"conn"`
+	Label string `json:"label,omitempty"`
 	Index int    `json:"index"`
 	Note  string `json:"note"`
 	Len   int    `json:"len"`
@@ -36,6 +38,8 @@ func JSONLRecorder(w io.Writer, maxBytes int) Observer {
 		}
 		line := recordLine{
 			Dir:   string(f.Direction),
+			Conn:  f.ConnID,
+			Label: f.Label,
 			Index: f.Index,
 			Note:  f.Note,
 			Len:   len(f.Payload),
