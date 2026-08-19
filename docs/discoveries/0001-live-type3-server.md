@@ -173,3 +173,35 @@ init requests and emit the corresponding accept — not chosen from captures. Tw
 research pieces remain for a general server: (1) init→accept generation, (2) the
 fast-ser Delta encoder for parameterized results. Fixed handshake tests
 (Connection, Unicode) work today; arbitrary programs need both.
+
+## Update — full calling-program flow captured (the material for both paths)
+
+Running the real `ZLOCAL_RFC_TEST` program through the sniffer captured its whole
+type-3 session:
+
+```
+gateway
+INIT 1444B -> accept 1079B      (a metadata/negotiation logon, then a burst of 8B NI pings)
+INIT 1668B -> accept  807B      (the work logon)
+REQ RFC_SYSTEM_INFO -> RESP 746B
+REQ STFC_CONNECTION -> RESP 2039B + 661B   (multi-frame)
+REQ STFC_STRUCTURE  -> RESP 765B
+REQ RFC_READ_TABLE  -> RESP 1480B
+REQ STFC_STRING     -> RESP ...
+```
+
+Findings:
+- A program logs on **twice** (metadata init 1444B, then work init 1668B), each
+  with its own accept — confirming again that the accept is init-dependent, and
+  adding accept sizes 807 (init 1668) to the map {1444->1079, 1668->807, 1818->817}.
+- Between logons the client exchanges a burst of **8-byte NI ping/pong** frames a
+  server must also service.
+- **Every function now has a real captured response** (RFC_SYSTEM_INFO,
+  STFC_CONNECTION — multi-frame, STFC_STRUCTURE, RFC_READ_TABLE, STFC_STRING).
+
+This is the raw material for both remaining paths. The pragmatic one is a
+**content-addressed responder**: decode the request's function name, serve the
+captured response for it (patched with this session's tokens). For a fixed
+program with fixed inputs it works end to end without a fast-ser encoder — the
+original backlog idea, now feasible. The general one is true fast-ser Delta
+generation. Captures preserved at /tmp/gold-program.jsonl and /tmp/gold-params.jsonl.
