@@ -86,3 +86,24 @@ func encodeUTF16LE(s string) []byte {
 	}
 	return out
 }
+
+// EncodeCutFunctionExceptionResponse encodes a declared-exception response with
+// the given exception key, which a client decodes as an ABAP exception.
+func EncodeCutFunctionExceptionResponse(exceptionKey string) ([]byte, error) {
+	if exceptionKey == "" {
+		return nil, fmt.Errorf("%w: exception key must not be empty", ErrRequest)
+	}
+	fields := []cpic.Field{
+		{Tag: 0x0401, Value: encodeUTF16LE(exceptionKey)}, // TagExceptionKey
+		{Tag: uint16(cpic.TagEnd), Value: nil},
+	}
+	chain, err := cpic.EncodeFieldChain(uint16(cpic.TagResponseStart), fields, cpic.FieldChainLimits{})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRequest, err)
+	}
+	out := make([]byte, 0, len(cutResponsePrefix)+len(chain)+2)
+	out = append(out, cutResponsePrefix...)
+	out = append(out, chain...)
+	out = append(out, 0xff, 0xff)
+	return out, nil
+}
