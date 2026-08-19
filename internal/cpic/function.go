@@ -356,7 +356,22 @@ func decodeFunctionResponseFields(fields []Field, additionalAllowedTags []uint16
 // DecodeFunctionResultFields decodes application fields for the value-codec
 // layer. Keep these values out of logs.
 func DecodeFunctionResultFields(data []byte) (DecodedFunctionResultFields, error) {
-	return decodeFunctionResponseEnvelope(data, []uint16{uint16(TagXRfcParameter), uint16(TagXRfcData)})
+	// s4ClassicExtensionTags are S/4HANA classic-serialization extension tags
+	// observed live and beyond upstream open-rfc's scope (classic non-S4): 0x0104
+	// accompanies scalar/structure exports, and the 0x033x family carries S4 table
+	// data. Tolerated so an S/4 classic response classifies instead of being
+	// rejected as an unknown tag.
+	var s4ClassicExtensionTags = []uint16{
+		uint16(TagXRfcParameter), uint16(TagXRfcData),
+		0x0104, 0x0331, 0x0333, 0x0334, 0x0335, 0x0336,
+	}
+
+	// (legacy note) 0x0104 and 0x0331 are S/4HANA classic-serialization extension tags observed
+	// live (RFC_SYSTEM_INFO carries 0x0104; STFC_STRUCTURE carries 0x0331). They
+	// are beyond upstream open-rfc's scope (classic non-S4) — an open-rfc-go
+	// extension — and are tolerated here so an S/4 classic response's envelope
+	// classifies instead of being rejected as an unknown tag.
+	return decodeFunctionResponseEnvelope(data, s4ClassicExtensionTags)
 }
 
 // DecodeResetServerContextResultFields decodes the reply to
