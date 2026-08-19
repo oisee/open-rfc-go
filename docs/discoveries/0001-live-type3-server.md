@@ -274,3 +274,23 @@ descriptors + (0x43 len 0x80 value) per field`, wrap in 0x5001, and add the
 success/GUID framing. Remaining to map: the descriptor table's exact grammar,
 the non-char type markers, table (multi-row) encoding, and the trailing 8 bytes
 (`0000 <len?> 0000 6d60`). This is the concrete Step 2 work — no longer opaque.
+
+## Step 2 — the SM59 serializer switch reframes the problem
+
+SM59 → Special Options → Select Transfer Protocol → **Serializer** is a
+per-destination dropdown: Classic / basXML / Force basXML / Fast serializer. So
+the fast serialization we had been fighting was simply the destination's default
+("Fast serializer"), not something inherent.
+
+Setting the destination to **Classic serializer** and capturing live: the
+fast-ser container **tag 0x5001 disappears entirely** (the Delta Manager /
+multiref beast — gone). What remains is a small set of S/4HANA classic-extension
+tags our ported (non-S4) `classicrfc` does not yet know — the connection GUID
+field **0x0514**, and tags **0x0104 / 0x0512** — which our own Go client never
+triggers (its responses decode cleanly). "Client or server is S/4 HANA system"
+is checked on the destination, which is what adds them.
+
+This narrows Step 2 dramatically: instead of implementing fast serialization
+(hard: stateful multiref), the classic-serializer path needs only a handful of
+S4 classic-extension tags decoded/encoded on top of the existing classic codecs.
+Captures: /tmp/gold-classic.jsonl (ABAP classic) alongside the fast-ser golds.
