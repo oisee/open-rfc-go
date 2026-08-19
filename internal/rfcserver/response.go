@@ -115,10 +115,18 @@ func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, guid
 	if err != nil {
 		return nil, err
 	}
+	meta0104 := append([]byte(nil), s4Meta0104...)
+	if len(guid) == 16 {
+		// 0x0104[205] is a session-GUID-derived byte: the swapped GUID's first
+		// byte minus 2 (established by diffing live sessions). The rest of 0x0104
+		// (an 8-byte metric and a counter) varies per call and so cannot be a
+		// value the client checks byte-exact.
+		meta0104[205] = swapRFCGUID(guid)[0] - 2
+	}
 	fields = append(fields,
 		cpic.Field{Tag: uint16(cpic.TagProgram), Value: program},
 		cpic.Field{Tag: 0x0667, Value: append([]byte(nil), s4Metric0667...)},
-		cpic.Field{Tag: 0x0104, Value: append([]byte(nil), s4Meta0104...)},
+		cpic.Field{Tag: 0x0104, Value: meta0104},
 		cpic.Field{Tag: uint16(cpic.TagEnd), Value: nil},
 	)
 
