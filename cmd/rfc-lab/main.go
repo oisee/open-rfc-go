@@ -146,6 +146,15 @@ func main() {
 		})
 	}
 
+	// type 3 (ours, generated): a state machine that GENERATES replies (no
+	// capture needed). SM59 target host = this box, system number 11.
+	eps = append(eps, endpoint{
+		typ:    "3(smart)",
+		listen: "0.0.0.0:3311",
+		role:   "our state-machine type-3 server (generates logon-accept + RFC_PING)",
+		run:    func() error { return serveSmartLoop(ctx, "0.0.0.0:3311") },
+	})
+
 	fmt.Println("rfc-lab: endpoints — point each SM59 destination's target at this box:")
 	for _, e := range eps {
 		fmt.Printf("  type %-4s  %-16s  %s\n", e.typ, e.listen, e.role)
@@ -268,6 +277,26 @@ func serveReplayLoop(ctx context.Context, listen string, script []rfcserver.Repl
 		}
 		fmt.Printf("rfc-lab[type T]: client %s\n", conn.RemoteAddr())
 		go rfcserver.ServeReplay(conn, script, func(s string) { fmt.Println("  [type T] " + s) })
+	}
+}
+
+func serveSmartLoop(ctx context.Context, listen string) error {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", listen)
+	if err != nil {
+		return err
+	}
+	go func() { <-ctx.Done(); _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		fmt.Printf("rfc-lab[smart]: client %s\n", conn.RemoteAddr())
+		go rfcserver.ServeSmart(conn, func(s string) { fmt.Println("  [smart] " + s) })
 	}
 }
 
