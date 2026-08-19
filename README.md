@@ -18,6 +18,10 @@ client, and now an experimental server, for SAP classic synchronous RFC.
 > | `RFC_READ_TABLE` | rc=0 · 17 cols × 2 rows |
 > | `STFC_STRING` | rc=0 |
 >
+> And a single Go endpoint answers **every SM59 test button green** — Connection Test,
+> Unicode Test, and Fast Serialization Test — across three serialization modes, plus
+> the program above.
+>
 > The **client** leg is live-proven too (STFC_CONNECTION / STFC_STRUCTURE / RFC_READ_TABLE
 > against A4H). Pure Go — no NW RFC SDK, no native library.
 >
