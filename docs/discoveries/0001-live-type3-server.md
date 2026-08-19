@@ -128,3 +128,33 @@ Handshake + RFC_PING are reachable with what is already known. Parameterized
 responses need a **fast-ser encoder** (the Delta Manager format) — the large,
 open piece, of which `DELTA_NO_OBJECT` is the first glimpse. This is the
 `docs/polyglot-rfc-server.md` server, now grounded in live wire facts.
+
+## Update — the logon-accept is init-dependent (per SM59 test)
+
+Stage 2 (decode requests) needed no new code: the existing classic
+`DecodeCutFunctionRequest` reads live ABAP fast-ser requests with zero errors
+across 27 captured calls (RFC_PING, RFC_SYSTEM_INFO, STFC_CONNECTION,
+STFC_STRUCTURE, STFC_STRING, RFC_READ_TABLE). `ServeSmart` now decodes and
+dispatches by name; RFC_PING drives the baked dance, RFC_SYSTEM_INFO returns a
+captured RFCSI (patched per session), others return SYSTEM_FAILURE.
+
+But the SM59 **Unicode Test** exposed the next wall. Captured live, it issues **no
+RFC function at all** — it performs the logon twice and checks the handshake:
+
+```
+gateway; INIT 1444B -> accept 1079B; 80B; INIT 1444B -> accept 1079B; 80B
+```
+
+Its init (1444 bytes) and its accept (1079 bytes) both differ from the
+Connection Test's (1818 / 817). So the **logon-accept is a function of the init**:
+different SM59 tests send different inits (requesting different capabilities) and
+expect correspondingly different accepts. A single baked accept template — enough
+for the Connection Test — cannot satisfy the Unicode Test; the client stalls
+after logon (sends an 80-byte control and never proceeds).
+
+Conclusion: baking one template per test does not scale. The real server must
+**generate the logon-accept from the client's init** — parse the requested
+capabilities and emit the matching accept. That, plus the fast-ser Delta encoder
+for table results, are the two large research pieces remaining. Everything up to
+here — transport, gateway, per-session token mirroring, request decode/dispatch,
+and a green Connection Test answered by our own Go — is done and on main.
