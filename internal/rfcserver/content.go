@@ -216,6 +216,7 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 			fn := "?"
 			if derr == nil {
 				fn = req.FunctionName
+				log("  → CALL " + summarizeRequest(req))
 			}
 			if script, ok := t.funcs[funcKey(mode, fn)]; ok {
 				if !runScript(tr, ctx, script, convID, guid, log) {
@@ -264,4 +265,78 @@ func uidOf(frame []byte) uint16 {
 		return uint16(frame[4])<<8 | uint16(frame[5])
 	}
 	return 0xffff
+}
+
+// summarizeRequest renders a decoded request for the live log: the function, the
+// requested outputs, each import parameter as name=value, and each table by name
+// and row count. It turns rfc-lab into a live inspector of what a client asks.
+func summarizeRequest(req Request) string {
+	out := req.FunctionName
+	if len(req.RequestedOutputs) > 0 {
+		out += fmt.Sprintf(" outputs=%v", req.RequestedOutputs)
+	}
+	for _, imp := range req.Imports {
+		out += fmt.Sprintf(" %s=%s", imp.Name, valPreview(imp.Value))
+	}
+	for _, tb := range req.Tables {
+		out += fmt.Sprintf(" %s[%d rows×%dB]", tb.Name, len(tb.Rows), tb.RowByteLength)
+	}
+	return out
+}
+
+// valPreview shows a parameter value as text when it is printable (ASCII or
+// UTF-16LE), else as a short hex prefix, bounded so the log stays readable.
+func valPreview(v []byte) string {
+	if len(v) == 0 {
+		return "\"\""
+	}
+	// UTF-16LE (classic char): every other byte is 0
+	if len(v) >= 2 && len(v)%2 == 0 {
+		ascii := true
+		var sb []byte
+		for i := 0; i+1 < len(v); i += 2 {
+			if v[i+1] != 0 || (v[i] != 0 && (v[i] < 0x20 || v[i] > 0x7e)) {
+				ascii = false
+				break
+			}
+			if v[i] != 0 {
+				sb = append(sb, v[i])
+			}
+		}
+		if ascii && len(sb) > 0 {
+			return fmt.Sprintf("%q", trimSp(string(sb)))
+		}
+	}
+	// plain ASCII
+	ascii := true
+	for _, c := range v {
+		if c != 0 && (c < 0x20 || c > 0x7e) {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return fmt.Sprintf("%q", trimSp(string(bytesNoNul(v))))
+	}
+	if len(v) > 12 {
+		return "0x" + hex.EncodeToString(v[:12]) + "…"
+	}
+	return "0x" + hex.EncodeToString(v)
+}
+
+func trimSp(s string) string {
+	for len(s) > 0 && s[len(s)-1] == ' ' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func bytesNoNul(v []byte) []byte {
+	out := make([]byte, 0, len(v))
+	for _, c := range v {
+		if c != 0 {
+			out = append(out, c)
+		}
+	}
+	return out
 }
