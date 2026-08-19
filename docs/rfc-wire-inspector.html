@@ -1,0 +1,366 @@
+<title>RFC Wire Inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #f5f7fa;
+    --border: #dbe0e8;
+    --border-strong: #c3cad6;
+    --text: #182031;
+    --muted: #5c6678;
+    --faint: #8a93a5;
+    --spine: #0e7490;
+    --client: #2563eb;
+    --server: #7c3aed;
+    --ok: #15803d;
+    --ok-bg: #e8f5ec;
+    --err: #c62828;
+    --err-bg: #fbeaea;
+    --warn: #a6650a;
+    --warn-bg: #f8efdd;
+    --appc: #55617a;
+    --appc-bg: #eef1f6;
+    --gw: #6d28d9;
+    --gw-bg: #efe9fb;
+    --req: #0e7490;
+    --req-bg: #e2f2f5;
+    --shadow: 0 1px 2px rgba(20,30,50,.06), 0 3px 12px rgba(20,30,50,.05);
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b0f16;
+      --surface: #141a24;
+      --surface-2: #10151d;
+      --border: #232c3b;
+      --border-strong: #334054;
+      --text: #e7ebf2;
+      --muted: #98a4b8;
+      --faint: #6b7789;
+      --spine: #22b8cf;
+      --client: #5b8bff;
+      --server: #a78bfa;
+      --ok: #4ade80;
+      --ok-bg: #12291b;
+      --err: #f87171;
+      --err-bg: #2c1618;
+      --warn: #e0b155;
+      --warn-bg: #2a2211;
+      --appc: #9aa6bd;
+      --appc-bg: #1a212d;
+      --gw: #b79bf7;
+      --gw-bg: #1f1830;
+      --req: #35c4d6;
+      --req-bg: #10262b;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0b0f16; --surface: #141a24; --surface-2: #10151d; --border: #232c3b;
+    --border-strong: #334054; --text: #e7ebf2; --muted: #98a4b8; --faint: #6b7789;
+    --spine: #22b8cf; --client: #5b8bff; --server: #a78bfa; --ok: #4ade80; --ok-bg: #12291b;
+    --err: #f87171; --err-bg: #2c1618; --warn: #e0b155; --warn-bg: #2a2211;
+    --appc: #9aa6bd; --appc-bg: #1a212d; --gw: #b79bf7; --gw-bg: #1f1830;
+    --req: #35c4d6; --req-bg: #10262b; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px; margin-bottom: 4px; }
+  .brand { font-size: 25px; font-weight: 700; letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+  .brand .dot { color: var(--spine); }
+  .sub { color: var(--muted); font-size: 14px; margin: 2px 0 22px; max-width: 68ch; }
+  .sub code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; min-width: 96px; box-shadow: var(--shadow); }
+  .stat .n { font-family: var(--mono); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-top: 2px; }
+  .stat.calls .n { color: var(--req); }
+  .stat.exc .n { color: var(--err); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 22px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  .btn { font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .btn:hover { border-color: var(--spine); color: var(--spine); }
+  .btn.primary { background: var(--spine); border-color: var(--spine); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); color: #fff; }
+  .btn:focus-visible, .chk:focus-visible { outline: 2px solid var(--spine); outline-offset: 2px; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar label.chk { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+  .toolbar input[type=checkbox] { accent-color: var(--spine); width: 15px; height: 15px; }
+  #file { display: none; }
+
+  .paste { width: 100%; margin-bottom: 22px; display: none; }
+  .paste textarea { width: 100%; min-height: 130px; font-family: var(--mono); font-size: 12px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: 10px; padding: 12px; resize: vertical; }
+  .paste .row { display: flex; gap: 10px; margin-top: 8px; }
+  .err-msg { color: var(--err); font-size: 13px; font-family: var(--mono); margin-top: 6px; }
+
+  /* connection block */
+  .conn { margin: 22px 0; }
+  .conn-head { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; }
+  .conn-head .label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); font-weight: 600; }
+  .conn-head .peers { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .conn-head .rule { flex: 1; height: 1px; background: var(--border); }
+
+  /* sequence diagram: two lanes + center spine */
+  .seq { position: relative; }
+  .seq::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: linear-gradient(var(--border-strong), var(--border-strong)); transform: translateX(-1px); }
+  .lanes { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .lane-cap { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 3px 10px; border-radius: 20px; }
+  .lane-cap.c { color: var(--client); background: color-mix(in srgb, var(--client) 12%, transparent); }
+  .lane-cap.s { color: var(--server); background: color-mix(in srgb, var(--server) 12%, transparent); }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 34px; align-items: start; margin: 7px 0; }
+  .frame { grid-row: 1; position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .frame.cs { grid-column: 1; }
+  .frame.sc { grid-column: 2; }
+  .frame > summary { list-style: none; cursor: pointer; padding: 9px 12px; display: flex; align-items: center; gap: 9px; }
+  .frame > summary::-webkit-details-marker { display: none; }
+  .frame .fmeta { font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .frame .title { font-size: 13.5px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frame .title .fn { font-family: var(--mono); font-weight: 600; }
+  .frame.sc > summary { flex-direction: row-reverse; text-align: right; }
+  .frame::after { content: ""; position: absolute; top: 16px; width: 20px; height: 2px; background: var(--dircol, var(--appc)); }
+  .frame.cs::after { right: -22px; }
+  .frame.sc::after { left: -22px; }
+  .frame.cs::before, .frame.sc::before { content: ""; position: absolute; top: 12px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+  .frame.cs::before { right: -22px; border-left: 6px solid var(--dircol, var(--appc)); }
+  .frame.sc::before { left: -22px; border-right: 6px solid var(--dircol, var(--appc)); }
+  .frame.cs { --dircol: var(--client); }
+  .frame.sc { --dircol: var(--server); }
+
+  .badge { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+  .b-gw { color: var(--gw); background: var(--gw-bg); }
+  .b-appc { color: var(--appc); background: var(--appc-bg); }
+  .b-req { color: var(--req); background: var(--req-bg); }
+  .b-ok { color: var(--ok); background: var(--ok-bg); }
+  .b-err { color: var(--err); background: var(--err-bg); }
+  .b-cpic { color: var(--warn); background: var(--warn-bg); }
+  .frame.has-detail > summary .title::after { content: "›"; color: var(--faint); margin-left: 6px; display: inline-block; transition: transform .15s; }
+  .frame.sc.has-detail > summary .title::after { margin: 0 6px 0 0; }
+  details.frame[open].has-detail > summary .title::after { transform: rotate(90deg); }
+
+  .detail { padding: 2px 13px 12px; border-top: 1px solid var(--border); margin-top: 2px; font-size: 12.5px; }
+  .frame.sc .detail { text-align: left; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; font-family: var(--mono); font-size: 12px; margin: 8px 0 0; }
+  .kv dt { color: var(--faint); }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .plist { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+  .plist li { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 12px; padding: 3px 8px; background: var(--surface-2); border-radius: 6px; }
+  .plist li .pn { font-weight: 600; }
+  .plist li .pv { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .grp-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 10px 0 3px; font-weight: 600; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); margin: 2px 4px 0 0; }
+  .detail .note { color: var(--err); font-family: var(--mono); font-size: 12px; margin-top: 8px; }
+  .redacted { color: var(--faint); font-style: italic; }
+
+  .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+  footer.foot { margin-top: 40px; color: var(--faint); font-size: 12px; border-top: 1px solid var(--border); padding-top: 16px; }
+  footer.foot code { font-family: var(--mono); }
+
+  @media (max-width: 720px) {
+    .seq::before { display: none; }
+    .row2 { grid-template-columns: 1fr; }
+    .frame.cs, .frame.sc { grid-column: 1; }
+    .frame.sc > summary { flex-direction: row; text-align: left; }
+    .frame::after, .frame::before { display: none; }
+    .frame.sc { border-left: 3px solid var(--server); }
+    .frame.cs { border-left: 3px solid var(--client); }
+    .lanes { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1 class="brand">RFC Wire Inspector<span class="dot">.</span></h1>
+  </header>
+  <p class="sub">Reads an annotated capture from <code>rfc-viewer -json</code> and draws the SAP classic-RFC conversation as a sequence between the client and the application server — gateway handshake, APPC records, and reassembled CPIC/CALL&nbsp;FUNCTION requests and responses. Scalar values stay redacted unless the capture was produced with <code>-values</code>.</p>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="toolbar">
+    <button class="btn primary" id="loadBtn">⬆ Load capture .json</button>
+    <button class="btn" id="pasteBtn">⌨ Paste JSON</button>
+    <button class="btn" id="sampleBtn">◆ Load sample</button>
+    <input type="file" id="file" accept=".json,application/json">
+    <span class="spacer"></span>
+    <label class="chk"><input type="checkbox" id="callsOnly"> CALL FUNCTION only</label>
+  </div>
+
+  <div class="paste" id="pasteBox">
+    <textarea id="pasteArea" placeholder="Paste the JSON from: rfc-viewer -json capture.jsonl"></textarea>
+    <div class="row"><button class="btn primary" id="pasteLoad">Render</button><span class="err-msg" id="pasteErr"></span></div>
+  </div>
+
+  <div id="out"></div>
+
+  <footer class="foot">
+    Frames are decoded by the same Go stack that speaks the protocol (<code>internal/gateway · appc · cpic · rfcserver · classicrfc</code>). A capture may contain credentials and application data — treat capture files as sensitive.
+  </footer>
+</div>
+
+<script>
+const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","gateway":{"version":2,"requestType":4,"clientAddr":"172.17.0.3","service":"sapdp00"}},{"dir":"S->C","index":0,"len":64,"layer":"gateway","gateway":{"version":2,"requestType":4,"clientAddr":"172.17.0.3","service":"sapdp00"}},{"dir":"C->S","index":1,"len":1894,"layer":"appc","appc":"UNKNOWN_0x03"},{"dir":"S->C","index":1,"len":817,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"cpic","bytes":737}},{"dir":"C->S","index":2,"len":721,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_PING"}},{"dir":"S->C","index":2,"len":511,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":3,"len":807,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_PING"}},{"dir":"S->C","index":3,"len":511,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":4,"len":807,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_PING"}},{"dir":"S->C","index":4,"len":511,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":5,"len":807,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_PING"}},{"dir":"S->C","index":5,"len":511,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":6,"len":80,"layer":"appc","appc":"F_SAP_SEND"},{"dir":"C->S","index":7,"len":1519,"layer":"appc","appc":"UNKNOWN_0x03"},{"dir":"S->C","index":6,"len":1281,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"cpic","bytes":1201}},{"dir":"C->S","index":8,"len":80,"layer":"appc","appc":"F_SAP_SEND"},{"dir":"C->S","index":9,"len":1469,"layer":"appc","appc":"UNKNOWN_0x03"},{"dir":"S->C","index":7,"len":811,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"cpic","bytes":731}},{"dir":"C->S","index":10,"len":519,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_PING"}},{"dir":"S->C","index":8,"len":469,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":11,"len":615,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"request","function":"RFC_SYSTEM_INFO","outputs":["FAST_SER_VERS","RFCSI_EXPORT","S4_HANA"]}},{"dir":"S->C","index":9,"len":1147,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"error","function":"CUT response","error":"cpic: protocol violation: CPIC function response trailer is invalid"}},{"dir":"C->S","index":0,"len":64,"layer":"gateway","gateway":{"version":2,"requestType":4,"clientAddr":"172.17.0.3","service":"sapdp00"}},{"dir":"S->C","index":0,"len":64,"layer":"gateway","gateway":{"version":2,"requestType":4,"clientAddr":"172.17.0.3","service":"sapdp00"}},{"dir":"C->S","index":1,"len":1498,"layer":"appc","appc":"UNKNOWN_0x03"},{"dir":"S->C","index":1,"len":834,"layer":"appc","appc":"F_SAP_SEND","cut":{"kind":"cpic","bytes":754}}]};
+
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+  let callsOnly = false;
+  let current = SAMPLE;
+
+  function groupConnections(frames) {
+    const groups = [];
+    let cur = null, sawNonZero = false;
+    for (const f of frames) {
+      if (f.index === 0 && sawNonZero) { cur = null; sawNonZero = false; }
+      if (!cur) { cur = []; groups.push(cur); }
+      cur.push(f);
+      if (f.index !== 0) sawNonZero = true;
+    }
+    return groups;
+  }
+
+  function badge(f) {
+    if (f.layer === "gateway") return `<span class="badge b-gw">GATEWAY</span>`;
+    if (f.layer === "raw") return `<span class="badge b-err">RAW</span>`;
+    const c = f.cut;
+    if (c) {
+      if (c.kind === "request") return `<span class="badge b-req">CALL FUNCTION</span>`;
+      if (c.kind === "response") return (c.success ? `<span class="badge b-ok">RESPONSE</span>` : `<span class="badge b-err">EXCEPTION</span>`);
+      if (c.kind === "error") return `<span class="badge b-err">DECODE ERR</span>`;
+      if (c.kind === "cpic") return `<span class="badge b-cpic">CPIC</span>`;
+    }
+    return `<span class="badge b-appc">${esc(f.appc || "APPC")}</span>`;
+  }
+
+  function titleOf(f) {
+    if (f.layer === "gateway") return `Gateway record`;
+    if (f.layer === "raw") return `Unframed`;
+    const c = f.cut;
+    if (c && c.kind === "request") return `<span class="fn">${esc(c.function)}</span>`;
+    if (c && c.kind === "response") return c.success ? `Success` : `Exception ${esc(c.exceptionKey||"")}`;
+    if (c && c.kind === "error") return `${esc(c.function||"CPIC")} — undecodable`;
+    if (c && c.kind === "cpic") return `CPIC packet`;
+    return esc(f.appc || "APPC");
+  }
+
+  function paramList(items, kind) {
+    if (!items || !items.length) return "";
+    const rows = items.map((p) => `<li><span class="pn">${esc(p.name)}</span><span class="pv">${p.value!=null?esc(p.value):`&lt;${p.len}B&gt;`}</span></li>`).join("");
+    return `<div class="grp-label">${kind}</div><ul class="plist">${rows}</ul>`;
+  }
+  function tableList(items) {
+    if (!items || !items.length) return "";
+    const rows = items.map((t) => `<li><span class="pn">${esc(t.name)}</span><span class="pv">${t.rows} row(s) × ${t.rowSize}B</span></li>`).join("");
+    return `<div class="grp-label">tables</div><ul class="plist">${rows}</ul>`;
+  }
+
+  function detailOf(f) {
+    if (f.layer === "gateway") {
+      const g = f.gateway || {};
+      return `<div class="kv"><dt>version</dt><dd>${g.version}</dd><dt>requestType</dt><dd>${g.requestType}</dd><dt>client</dt><dd>${esc(g.clientAddr||"")}</dd><dt>service</dt><dd>${esc(g.service||"")}</dd></div>`;
+    }
+    if (f.layer === "raw") return `<div class="note">${esc(f.note||"not an APPC record")}</div>`;
+    const c = f.cut;
+    if (!c) return "";
+    if (c.kind === "request") {
+      let h = "";
+      if (c.outputs && c.outputs.length) h += `<div class="grp-label">requested outputs</div><div>${c.outputs.map((o)=>`<span class="tag">${esc(o)}</span>`).join("")}</div>`;
+      h += paramList(c.imports, "imports");
+      h += tableList(c.tables);
+      return h || `<div class="redacted">no parameters</div>`;
+    }
+    if (c.kind === "response") {
+      if (!c.success) return `<div class="kv"><dt>outcome</dt><dd>${esc(c.outcome||"")}</dd><dt>key</dt><dd>${esc(c.exceptionKey||"")}</dd></div>`;
+      return (paramList(c.exports, "exports") + tableList(c.tables)) || `<div class="redacted">no exports</div>`;
+    }
+    if (c.kind === "error") return `<div class="note">${esc(c.error||"")}</div>`;
+    if (c.kind === "cpic") return `<div class="redacted">${c.bytes}-byte CPIC packet — logon or unmodelled message, redacted</div>`;
+    return "";
+  }
+
+  function hasDetail(f) {
+    if (f.layer === "gateway" || f.layer === "raw") return true;
+    const c = f.cut;
+    if (!c) return false;
+    if (c.kind === "cpic") return true;
+    if (c.kind === "error") return true;
+    if (c.kind === "request") return !!((c.outputs&&c.outputs.length)||(c.imports&&c.imports.length)||(c.tables&&c.tables.length));
+    if (c.kind === "response") return true;
+    return false;
+  }
+
+  function render() {
+    const frames = (current.frames || []).filter((f) => !callsOnly || (f.cut && (f.cut.kind === "request" || f.cut.kind === "response" || f.cut.kind === "error")));
+    const out = $("#out");
+    if (!frames.length) { out.innerHTML = `<div class="empty">No frames to show. Load a capture or the sample.</div>`; renderStats([]); return; }
+    const groups = groupConnections(frames);
+    out.innerHTML = groups.map((g, gi) => {
+      const rows = g.map((f) => {
+        const side = f.dir === "C->S" ? "cs" : "sc";
+        const dOpen = ""; // collapsed by default
+        const detailHtml = hasDetail(f) ? `<div class="detail">${detailOf(f)}</div>` : "";
+        const cls = `frame ${side}${hasDetail(f) ? " has-detail" : ""}`;
+        return `<div class="row2"><details class="${cls}"${dOpen}>
+            <summary><span class="fmeta">#${f.index} · ${f.len}B</span> ${badge(f)} <span class="title">${titleOf(f)}</span></summary>
+            ${detailHtml}
+          </details></div>`;
+      }).join("");
+      return `<section class="conn">
+        <div class="conn-head"><span class="label">Connection ${gi+1}</span><span class="peers">${g.length} frames</span><span class="rule"></span></div>
+        <div class="seq"><div class="lanes"><span class="lane-cap c">Client →</span><span class="lane-cap s">← SAP</span></div>${rows}</div>
+      </section>`;
+    }).join("");
+    renderStats(current.frames || []);
+  }
+
+  function renderStats(frames) {
+    const conns = frames.length ? groupConnections(frames).length : 0;
+    const calls = frames.filter((f)=>f.cut&&f.cut.kind==="request").length;
+    const exc = frames.filter((f)=>f.cut&&((f.cut.kind==="response"&&!f.cut.success)||f.cut.kind==="error")).length;
+    $("#stats").innerHTML = [
+      ["frames", frames.length, ""],
+      ["connections", conns, ""],
+      ["CALL FUNCTION", calls, "calls"],
+      ["decode issues", exc, "exc"],
+    ].map(([k,n,cls])=>`<div class="stat ${cls}"><div class="n">${n}</div><div class="k">${k}</div></div>`).join("");
+  }
+
+  function load(obj) {
+    if (!obj || !Array.isArray(obj.frames)) throw new Error('expected {"frames":[…]} from rfc-viewer -json');
+    current = obj; render();
+  }
+
+  $("#loadBtn").addEventListener("click", () => $("#file").click());
+  $("#file").addEventListener("change", (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = () => { try { load(JSON.parse(r.result)); } catch (err) { alert("Could not parse capture: " + err.message); } };
+    r.readAsText(file);
+  });
+  $("#pasteBtn").addEventListener("click", () => {
+    const b = $("#pasteBox"); b.style.display = b.style.display === "block" ? "none" : "block";
+    if (b.style.display === "block") $("#pasteArea").focus();
+  });
+  $("#pasteLoad").addEventListener("click", () => {
+    try { load(JSON.parse($("#pasteArea").value)); $("#pasteErr").textContent = ""; $("#pasteBox").style.display = "none"; }
+    catch (err) { $("#pasteErr").textContent = err.message; }
+  });
+  $("#sampleBtn").addEventListener("click", () => load(SAMPLE));
+  $("#callsOnly").addEventListener("change", (e) => { callsOnly = e.target.checked; render(); });
+
+  render();
+</script>
