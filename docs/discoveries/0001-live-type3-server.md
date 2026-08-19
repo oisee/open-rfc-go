@@ -294,3 +294,23 @@ This narrows Step 2 dramatically: instead of implementing fast serialization
 (hard: stateful multiref), the classic-serializer path needs only a handful of
 S4 classic-extension tags decoded/encoded on top of the existing classic codecs.
 Captures: /tmp/gold-classic.jsonl (ABAP classic) alongside the fast-ser golds.
+
+## Step 2 — narrowed to a few S/4 classic-extension tags
+
+With **Classic serializer + Deactivate delta manager** (SM59 Special RFC Flags,
+see the flags memory), the wire is at its simplest: no fast-ser 0x5001, no
+multiref. Our real RFCPRO decoder now parses the framing, the connection GUID
+(0x0514), and the success control (0x0420) of an ABAP response, and stops at
+exactly two unknown tags:
+
+- **0x0104** — appears in the RFC_SYSTEM_INFO response
+- **0x0331** — appears in the STFC_STRUCTURE response (near the classic table
+  tags 0x0301–0x0304)
+
+These are S/4HANA classic-serialization extensions the ported (non-S4) RFCPRO
+grammar in `internal/cpic/grammar.go` does not model. That is the entire
+remaining gap for the classic path: teach the grammar these tags (and their
+counterparts on the encode side), verify against the saved golds
+(/tmp/gold-classic-deltaoff.jsonl), and the server can then GENERATE classic
+responses from values using the existing classicrfc codecs — no fast-ser encoder
+needed. This is code work against captures, not more live SAP interaction.
