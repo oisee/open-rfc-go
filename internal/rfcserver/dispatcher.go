@@ -89,3 +89,23 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestPayload []byte) ([]byt
 	}
 	return EncodeCutFunctionResponse(resp.Exports, resp.Tables)
 }
+
+// Invoke runs the handler for a decoded request and returns the structured
+// Response, or a non-empty exception key if the function is unknown or the
+// handler failed. It lets a server encode the reply itself (e.g. with the S4
+// envelope) instead of taking Dispatch's pre-encoded classic bytes.
+func (d *Dispatcher) Invoke(ctx context.Context, req Request) (Response, string) {
+	h, ok := d.handler(req.FunctionName)
+	if !ok {
+		return Response{}, UnknownFunctionKey
+	}
+	resp, err := h(ctx, req)
+	if err != nil {
+		var exc *Exception
+		if errors.As(err, &exc) && exc.Key != "" {
+			return Response{}, exc.Key
+		}
+		return Response{}, SystemFailureKey
+	}
+	return resp, ""
+}

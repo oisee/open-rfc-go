@@ -60,10 +60,12 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 			pingStep = 0
 			log(fmt.Sprintf("LOGON: init=%dB accept=%dB (conv=%s)", len(got), len(acc), string(convID)))
 		case len(got) > 80 && got[0] == 0x06 && got[1] == byte(0xcb): // function request
-			fn := "?"
-			if req, derr := DecodeCutFunctionRequest(got[80:]); derr == nil {
-				fn = req.FunctionName
+			req, derr := DecodeCutFunctionRequest(got[80:])
+			if derr != nil {
+				log("SESSION: decode error: " + derr.Error())
+				return
 			}
+			fn := req.FunctionName
 			if _, ok := d.handler(fn); !ok && fn == "RFC_PING" {
 				// no ping handler: keep the client alive with the recorded dance
 				resp := patchSession(smartPingSteps[pingStep%len(smartPingSteps)], convID, guid)
@@ -74,9 +76,17 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 				log("SESSION: RFC_PING (ping dance)")
 				continue
 			}
-			respCUT, derr := d.Dispatch(ctx, got[80:])
-			if derr != nil {
-				log("SESSION: dispatch error: " + derr.Error())
+			var respCUT []byte
+			var werr error
+			if resp, excKey := d.Invoke(ctx, req); excKey != "" {
+				respCUT, werr = EncodeCutFunctionExceptionResponse(excKey)
+				log(fmt.Sprintf("SESSION: %s -> exception %s", fn, excKey))
+			} else {
+				respCUT, werr = EncodeCutFunctionResponseS4(resp.Exports, resp.Tables, guid, req.RequestedOutputs)
+				log(fmt.Sprintf("SESSION: %s -> generated (%d exports, %d tables)", fn, len(resp.Exports), len(resp.Tables)))
+			}
+			if werr != nil {
+				log("SESSION: encode error: " + werr.Error())
 				return
 			}
 			wrapped, werr := wrapFSapSend(respCUT, convID, binary.BigEndian.Uint16(got[4:6]))
@@ -84,12 +94,9 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string)) {
 				log("SESSION: wrap error: " + werr.Error())
 				return
 			}
-			// The generated response carries no session GUID; the client matches on
-			// the conversation id in the record header, already set by wrapFSapSend.
 			if t.Send(wrapped) != nil {
 				return
 			}
-			log(fmt.Sprintf("SESSION: %s -> generated %dB response", fn, len(respCUT)))
 		default:
 			// control frames need no reply
 		}
