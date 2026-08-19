@@ -11,7 +11,11 @@ package client
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,4 +263,145 @@ func containsField(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestLiveFunctionSearch lists function modules matching a pattern via
+// RFC_FUNCTION_SEARCH and decodes the returned FUNCTIONS table at runtime.
+func TestLiveFunctionSearch(t *testing.T) {
+	sess, ctx := liveSession(t)
+	iface := liveInterface(t, sess, ctx, "RFC_FUNCTION_SEARCH")
+	var patternName, tableName, rowType string
+	for _, p := range iface.Parameters {
+		if p.ParameterClass == "I" && p.ParameterName == "FUNCNAME" {
+			patternName = p.ParameterName
+		}
+		if p.ParameterClass == "T" {
+			tableName, rowType = p.ParameterName, p.TableName
+		}
+	}
+	if patternName == "" || tableName == "" {
+		t.Fatalf("unexpected RFC_FUNCTION_SEARCH interface: %+v", iface.Parameters)
+	}
+	def := liveStructDef(t, sess, ctx, rowType)
+
+	pattern, err := classicrfc.EncodeAbapChar("STFC*", 30)
+	if err != nil {
+		t.Fatalf("encode pattern: %v", err)
+	}
+	req, err := cpic.EncodeCutFunctionRequest(cpic.CutFunctionRequestInput{
+		FunctionName:     "RFC_FUNCTION_SEARCH",
+		RequestedOutputs: []string{tableName},
+		Imports:          []cpic.NamedValue{{Name: patternName, Value: pattern}},
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	res, err := sess.CallRaw(ctx, req)
+	if err != nil {
+		t.Fatalf("RFC_FUNCTION_SEARCH: %v", err)
+	}
+	classic, err := classicrfc.DecodeResult(res.Fields)
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	found := 0
+	for _, tbl := range classic.Tables {
+		if tbl.Name != tableName {
+			continue
+		}
+		t.Logf("%s: %d function(s) matching STFC*", tbl.Name, len(tbl.Rows))
+		for _, row := range tbl.Rows {
+			d, derr := structure.Decode(def, row)
+			if derr != nil {
+				t.Fatalf("decode row: %v", derr)
+			}
+			t.Logf("   %-30v group=%v", d["FUNCNAME"], d["GROUPNAME"])
+			found++
+		}
+	}
+	if found == 0 {
+		t.Fatalf("no functions returned for STFC*")
+	}
+}
+
+// TestLiveReadTable reads a few rows of a small, safe dictionary table (T000,
+// the client table) through RFC_READ_TABLE, using the returned FIELDS layout to
+// slice each DATA work area. This is the canonical "look into a table" call.
+func TestLiveReadTable(t *testing.T) {
+	sess, ctx := liveSession(t)
+
+	queryTable, err := classicrfc.EncodeAbapChar("T000", 30)
+	if err != nil {
+		t.Fatalf("encode QUERY_TABLE: %v", err)
+	}
+	rowcount := make([]byte, 4)
+	binary.LittleEndian.PutUint32(rowcount, 5)
+
+	req, err := cpic.EncodeCutFunctionRequest(cpic.CutFunctionRequestInput{
+		FunctionName:     "RFC_READ_TABLE",
+		RequestedOutputs: []string{"DATA", "FIELDS"},
+		Imports: []cpic.NamedValue{
+			{Name: "QUERY_TABLE", Value: queryTable},
+			{Name: "ROWCOUNT", Value: rowcount},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	res, err := sess.CallRaw(ctx, req)
+	if err != nil {
+		t.Fatalf("RFC_READ_TABLE: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("RFC_READ_TABLE returned failure")
+	}
+	classic, err := classicrfc.DecodeResult(res.Fields)
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+
+	fieldsDef := liveStructDef(t, sess, ctx, "RFC_DB_FLD")
+	dataDef := liveStructDef(t, sess, ctx, "TAB512")
+
+	type column struct {
+		name          string
+		offset, width int
+	}
+	var columns []column
+	var dataRows [][]byte
+	for _, tbl := range classic.Tables {
+		switch tbl.Name {
+		case "FIELDS":
+			for _, row := range tbl.Rows {
+				d, derr := structure.Decode(fieldsDef, row)
+				if derr != nil {
+					t.Fatalf("decode FIELDS row: %v", derr)
+				}
+				off, _ := strconv.Atoi(strings.TrimSpace(fmt.Sprint(d["OFFSET"])))
+				w, _ := strconv.Atoi(strings.TrimSpace(fmt.Sprint(d["LENGTH"])))
+				columns = append(columns, column{name: fmt.Sprint(d["FIELDNAME"]), offset: off, width: w})
+			}
+		case "DATA":
+			dataRows = tbl.Rows
+		}
+	}
+	if len(columns) == 0 || len(dataRows) == 0 {
+		t.Fatalf("RFC_READ_TABLE returned %d columns and %d rows", len(columns), len(dataRows))
+	}
+	t.Logf("T000: %d columns, %d rows", len(columns), len(dataRows))
+	for i, row := range dataRows {
+		d, derr := structure.Decode(dataDef, row)
+		if derr != nil {
+			t.Fatalf("decode DATA row: %v", derr)
+		}
+		wa := fmt.Sprint(d["WA"])
+		runes := []rune(wa)
+		var parts []string
+		for _, c := range columns {
+			if c.offset+c.width <= len(runes) {
+				parts = append(parts, fmt.Sprintf("%s=%q", c.name, strings.TrimRight(string(runes[c.offset:c.offset+c.width]), " ")))
+			}
+		}
+		t.Logf("   row[%d] %s", i, strings.Join(parts, " "))
+	}
 }
