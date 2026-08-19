@@ -448,13 +448,92 @@ func decodeResult(fields []cpic.Field, borrow bool) (Result, error) {
 				Name: name, DeclaredRowByteLength: header.DeclaredRowByteLength, RowByteLength: rowByteLength,
 				RowEncoding: rowEncoding, RowCompression: rowCompression, Rows: rows,
 			})
-		case 0x0104:
-			// S/4HANA classic-serialization trailing annotation on scalar/structure
-			// exports; the actual values are in the classic 0x02xx fields, so this
-			// is skipped. The 0x033x table family (0x0331/0333/0334/0335/0336) is a
-			// distinct S4 table serialization not yet modelled — it falls through to
-			// the unsupported-tag error below. An open-rfc-go extension, beyond
-			// upstream open-rfc's classic (non-S4) scope.
+		case 0x0331, 0x0336, 0x0104:
+			// S/4HANA classic-serialization markers with no row data to extract:
+			// 0x0331 declares a table id up front, 0x0336 is a per-table trailer,
+			// 0x0104 is a trailing annotation on scalar/structure exports. An
+			// open-rfc-go extension, beyond upstream's classic (non-S4) scope.
+		case 0x0335:
+			// S4 mixed table: [kind:4][tableId:4][rowCount:4], then a classic table
+			// header (0x0302) and classic rows (0x0303/0x0304). Reuse the classic
+			// row reading; the name is positional (the wire carries only an id).
+			if len(field.Value) < 12 {
+				return zero, fmt.Errorf("%w: S4 table descriptor 0x0335 is too short", ErrProtocol)
+			}
+			name := fmt.Sprintf("S4TAB%d", binary.BigEndian.Uint32(field.Value[4:8]))
+			if index+1 >= len(fields) || fields[index+1].Tag != uint16(cpic.TagTableHeader) {
+				return zero, fmt.Errorf("%w: S4 table %s is not followed by its header", ErrProtocol, name)
+			}
+			header, err := DecodeRfcTableHeader(fields[index+1].Value)
+			if err != nil {
+				return zero, err
+			}
+			var rows [][]byte
+			sawUncompressed, sawSimpleCompressed := false, false
+			rowByteLength := int(header.DeclaredRowByteLength)
+			index += 2
+			for uint32(len(rows)) < header.RowCount && index < len(fields) &&
+				(fields[index].Tag == uint16(cpic.TagTableContent) || fields[index].Tag == uint16(cpic.TagTableCompr)) {
+				rowField := fields[index]
+				var row []byte
+				if rowField.Tag == uint16(cpic.TagTableCompr) {
+					sawSimpleCompressed = true
+					row, err = decodeSimpleCompressedTableRow(rowField.Value, header.DeclaredRowByteLength, name, len(rows), borrow)
+					if err != nil {
+						return zero, err
+					}
+				} else {
+					sawUncompressed = true
+					row = retainedWireBuffer(rowField.Value, borrow)
+				}
+				if len(rows) == 0 {
+					rowByteLength = len(row)
+				}
+				rows = append(rows, row)
+				index++
+			}
+			if uint32(len(rows)) != header.RowCount {
+				return zero, fmt.Errorf("%w: S4 table %s declares %d rows but found %d", ErrProtocol, name, header.RowCount, len(rows))
+			}
+			rowEncoding, rowCompression := "flat", "none"
+			if sawSimpleCompressed && !sawUncompressed {
+				rowEncoding, rowCompression = "structured", "simple"
+			} else if sawSimpleCompressed {
+				rowEncoding, rowCompression = "mixed", "mixed"
+			}
+			index--
+			result.Tables = append(result.Tables, Table{
+				Name: name, DeclaredRowByteLength: header.DeclaredRowByteLength, RowByteLength: rowByteLength,
+				RowEncoding: rowEncoding, RowCompression: rowCompression, Rows: rows,
+			})
+		case 0x0333:
+			// S4 native table: [kind:4][tableId:4][rowCount:4], then 0x0334 holding
+			// all rows concatenated at a fixed width.
+			if len(field.Value) < 12 {
+				return zero, fmt.Errorf("%w: S4 table descriptor 0x0333 is too short", ErrProtocol)
+			}
+			name := fmt.Sprintf("S4TAB%d", binary.BigEndian.Uint32(field.Value[4:8]))
+			count := int(binary.BigEndian.Uint32(field.Value[8:12]))
+			if index+1 >= len(fields) || fields[index+1].Tag != 0x0334 {
+				return zero, fmt.Errorf("%w: S4 native table %s is not followed by its 0x0334 data", ErrProtocol, name)
+			}
+			data := fields[index+1].Value
+			width := 0
+			if count > 0 {
+				if len(data)%count != 0 {
+					return zero, fmt.Errorf("%w: S4 native table %s data %d is not a multiple of row count %d", ErrProtocol, name, len(data), count)
+				}
+				width = len(data) / count
+			}
+			var rows [][]byte
+			for r := 0; r < count; r++ {
+				rows = append(rows, retainedWireBuffer(data[r*width:(r+1)*width], borrow))
+			}
+			result.Tables = append(result.Tables, Table{
+				Name: name, DeclaredRowByteLength: uint32(width), RowByteLength: width,
+				RowEncoding: "flat", RowCompression: "none", Rows: rows,
+			})
+			index++
 		default:
 			return zero, fmt.Errorf("%w: classic RFC response contains unsupported tag 0x%04x", ErrProtocol, field.Tag)
 		}
