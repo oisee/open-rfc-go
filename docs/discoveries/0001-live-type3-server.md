@@ -314,3 +314,26 @@ counterparts on the encode side), verify against the saved golds
 (/tmp/gold-classic-deltaoff.jsonl), and the server can then GENERATE classic
 responses from values using the existing classicrfc codecs — no fast-ser encoder
 needed. This is code work against captures, not more live SAP interaction.
+
+## Step 2 — S/4HANA classic tag family mapped; scalars decode
+
+With Classic serializer + delta off, decoding an S/4 classic response needed two
+layers taught the S4 extension tags: the rfcerr envelope (tolerate) and
+classicrfc (extract). Full S4 tag inventory from the golds:
+
+- **0x0104** — trailing annotation on scalar/structure exports (skippable; the
+  values are the classic 0x0201/0x0203 fields). **Done** — scalars now decode
+  (RFC_SYSTEM_INFO, STFC_CONNECTION echo, STFC_STRING).
+- **0x033x table family** (a distinct S4 table serialization):
+  - `0x0331` (len 4) — S4 table id/marker (one per table)
+  - `0x0333` (len 12) + `0x0334` (len N) — S4-native table descriptor + row data
+    (STFC_STRUCTURE's RFCTABLE uses this)
+  - `0x0335` (len 12) — S4 table descriptor that precedes *classic* `0x0302`
+    header + `0x0304` rows (RFC_READ_TABLE uses this mixed form)
+  - `0x0336` (len 4) — S4 table trailer / row count
+
+Row data is plainly present and readable (RFC_READ_TABLE T000 rows "000SAP SE",
+FIELDS "MANDT/MTEXT/…"; STFC_STRUCTURE RFCTABLE with "A4H"). The remaining Step 2
+work is to parse this 0x033x family into tables (both the S4-native 0x0333/0x0334
+form and the 0x0335+classic mixed form), then the encode side. Golds:
+/tmp/gold-classic-deltaoff.jsonl.
