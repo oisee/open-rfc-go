@@ -21,7 +21,7 @@ and `context.Context`; and about 7k (`src/compat/`) is dropped outright.
 | 3b | Structure & xRFC codecs (classic-structure, classic-xrfc, recursive xRFC) | `src/values/{classic-structure,classic-xrfc,recursive-*}.ts` | **done** — flat structures/tables verified live; all three xRFC codecs (`classic-xrfc`, `recursive-xrfc`, `recursive-classic-xrfc`) ported with oracle tests + fuzz in `internal/xrfc` |
 | 4 | Metadata decoders: `RFC_METADATA_GET`, `DDIF_FIELDINFO`, function/structure interface (+ `classic-rfc`) | `src/metadata/{recursive-metadata,recursive-parameter-index,rfc-function-interface,rfc-structure-definition,ddif-fieldinfo,rfc-metadata-get}.ts`, `src/protocol/classic-rfc.ts` | **done** |
 | 5 | Transport over `net.Conn`; first live `STFC_CONNECTION` | `src/transport/ni-socket.ts`, `src/client/direct-cpic-session.ts` | **done** (live call verified 2026-08-19 against A4H, kernel 758) |
-| 6 | Pool, session contexts, transactions, SAProuter, SOCKS5 | `src/pool/`, `src/lifecycle/`, `src/transport/` | **in progress** — connection pool (`internal/pool`) and SAProuter route codec (`internal/saprouter`) done, Go-idiomatic |
+| 6 | Pool, session contexts, transactions, SAProuter, SOCKS5 | `src/pool/`, `src/lifecycle/`, `src/transport/` | **in progress** — connection pool (`internal/pool`), SAProuter route codec (`internal/saprouter`), and SOCKS5 dialer (`internal/socks5`) done, Go-idiomatic |
 
 The metadata **repository runtime** (`src/metadata/repository-runtime.ts`) and
 **structured diagnostics** (`src/diagnostics/structured-diagnostics.ts`) are not
@@ -94,6 +94,17 @@ See docs/provenance.md.
 consumer, so the budget goes to a Go-idiomatic API instead.
 
 ## Future direction (idea, not scope)
+
+**A pure-Go SAProuter server (plaintext).** The client is already SAP-binary-free
+and `internal/saprouter` handles routing *through* an existing SAProuter. A
+natural separate track is to implement the SAProuter *server* in Go — an
+auditable, containerizable proxy that replaces SAP's proprietary `saprouter`
+binary. Scope: reuse NI framing and route admission, add an NI_ROUTE payload
+decoder, NI_PONG/NI_RTERR encoders, a saprouttab-style ACL, and a bidirectional
+NI-frame tunnel with router-to-router chaining. SNC (channel encryption) is the
+hard, out-of-scope part; a plaintext router still serves the common unencrypted
+internal/dev topologies. Not part of milestone 6.
+
 
 Recorded as intent, not a committed milestone — this port must first reach a
 live synchronous call (milestone 5) before any of this is actionable.
