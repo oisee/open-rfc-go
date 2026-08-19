@@ -5,6 +5,7 @@ package sniffer
 import (
 	"context"
 	"encoding/binary"
+	jsonpkg "encoding/json"
 	"io"
 	"net"
 	"sync"
@@ -139,3 +140,45 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestJSONLRecorder(t *testing.T) {
+	var buf bytesBuffer
+	rec := JSONLRecorder(&buf, 4)
+	rec(Frame{Direction: ClientToServer, Index: 0, Note: "GW_NORMAL_CLIENT", Payload: []byte{1, 2, 3, 4, 5, 6}})
+	rec(Frame{Direction: ServerToClient, Index: 0, Note: "NI_PONG", Payload: []byte("NI_PONG\x00")})
+	lines := splitLines(buf.String())
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 JSONL lines, got %d: %q", len(lines), buf.String())
+	}
+	var first recordLine
+	if err := jsonUnmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("parse line 0: %v", err)
+	}
+	if first.Dir != "C->S" || first.Note != "GW_NORMAL_CLIENT" || first.Len != 6 || first.Hex != "01020304" {
+		t.Fatalf("line 0 = %+v (hex should be capped to 4 bytes, len is full 6)", first)
+	}
+}
+
+type bytesBuffer struct{ b []byte }
+
+func (w *bytesBuffer) Write(p []byte) (int, error) { w.b = append(w.b, p...); return len(p), nil }
+func (w *bytesBuffer) String() string              { return string(w.b) }
+
+func splitLines(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			if i > start {
+				out = append(out, s[start:i])
+			}
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
+func jsonUnmarshal(data []byte, v any) error { return jsonpkg.Unmarshal(data, v) }

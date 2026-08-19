@@ -9,3 +9,8 @@ testdata/fuzz/
 
 # Local SAP MCP config — contains live credentials, never commit
 .mcp.json
+
+# Built CLI binaries and traffic captures (captures may contain credentials)
+/rfc-sniffer
+*.jsonl
+/captures/
