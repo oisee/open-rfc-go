@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oisee/open-rfc-go/rfc"
 )
@@ -100,9 +101,17 @@ func (c Config) resolve(name string) (System, error) {
 	return sys, nil
 }
 
-// Open resolves the named system and dials a client. It also returns the system's
-// tool policy (Expose/Hide/ReadOnly/MaxTools) for rfc-mcp.
+// Open resolves the named system and dials a client with the default per-call
+// timeout. It also returns the system's tool policy (Expose/Hide/ReadOnly/
+// MaxTools) for rfc-mcp.
 func Open(ctx context.Context, name string) (*rfc.Client, Options, error) {
+	return OpenWithTimeout(ctx, name, 0)
+}
+
+// OpenWithTimeout is Open with an explicit bound on a single call (0 = the
+// client default). Raise it for calls that block server-side — a debugger
+// listener, a long-running report — where the default would time out first.
+func OpenWithTimeout(ctx context.Context, name string, timeout time.Duration) (*rfc.Client, Options, error) {
 	cfg := Load()
 	sys, err := cfg.resolve(name)
 	if err != nil {
@@ -117,13 +126,14 @@ func Open(ctx context.Context, name string) (*rfc.Client, Options, error) {
 		lang = "E"
 	}
 	c, err := rfc.Open(ctx, rfc.Destination{
-		Host:     sys.Ashost,
-		Port:     3300 + n,
-		Service:  fmt.Sprintf("sapdp%02d", n),
-		Client:   sys.Client,
-		User:     sys.User,
-		Password: sys.Password,
-		Language: string([]rune(strings.ToUpper(lang))[0:1]),
+		OperationTimeout: timeout,
+		Host:             sys.Ashost,
+		Port:             3300 + n,
+		Service:          fmt.Sprintf("sapdp%02d", n),
+		Client:           sys.Client,
+		User:             sys.User,
+		Password:         sys.Password,
+		Language:         string([]rune(strings.ToUpper(lang))[0:1]),
 	})
 	if err != nil {
 		return nil, Options{}, err
@@ -170,7 +180,6 @@ func ReadTable(ctx context.Context, c *rfc.Client, table, where string, fields [
 	}
 	return out, nil
 }
-
 
 // LoadOptions returns the tool policy (Expose/Hide/ReadOnly/MaxTools) for a named
 // system from .rfc.json, without dialing. rfc-mcp merges it with command-line

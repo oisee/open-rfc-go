@@ -18,12 +18,16 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oisee/open-rfc-go/cmd/rfctool"
 	"github.com/oisee/open-rfc-go/rfc"
 )
 
-var systemName string
+var (
+	systemName  string
+	callTimeout time.Duration
+)
 
 func main() {
 	args := stripSystemFlag(os.Args[1:])
@@ -43,6 +47,13 @@ func stripSystemFlag(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		if (args[i] == "-s" || args[i] == "--system") && i+1 < len(args) {
 			systemName = args[i+1]
+			i++
+			continue
+		}
+		if args[i] == "--timeout" && i+1 < len(args) {
+			if secs, err := strconv.Atoi(args[i+1]); err == nil {
+				callTimeout = time.Duration(secs) * time.Second
+			}
 			i++
 			continue
 		}
@@ -73,6 +84,8 @@ Flags:
 
 Global:
   -s, --system <name>          pick a system from .rfc.json
+      --timeout <seconds>      bound one call (default 30); raise it for calls
+                               that block server-side, e.g. a debugger listener
 
 Connection: .rfc.json (named systems) and/or env SAP_ASHOST, SAP_SYSNR (00),
 SAP_CLIENT (001), SAP_USER, SAP_PASSWORD/SAP_PASSWD, SAP_LANG (EN) — env wins.
@@ -183,7 +196,7 @@ func readParams(args []string) (rfc.Params, error) {
 }
 
 func withClient(ctx context.Context, fn func(*rfc.Client) error) error {
-	c, _, err := rfctool.Open(ctx, systemName)
+	c, _, err := rfctool.OpenWithTimeout(ctx, systemName, callTimeout)
 	if err != nil {
 		return err
 	}
