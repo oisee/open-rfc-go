@@ -78,13 +78,13 @@ decode captures offline with `rfc-viewer`:
 go run ./cmd/rfc-lab -target-host <your-real-sap-host>
 #   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
 #   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
-go run ./cmd/rfc-viewer cap-lab.jsonl              # decoded text transcript (values redacted)
-go run ./cmd/rfc-viewer -json cap-lab.jsonl > cap.json  # annotated JSON …
-#   … then open docs/rfc-wire-inspector.html in a browser and load cap.json to inspect it visually
+go run ./cmd/rfc-viewer cap-lab.jsonl                # decoded text transcript (values redacted)
+go run ./cmd/rfc-viewer -html cap-lab.jsonl         # writes cap-lab.html — a self-contained visual inspector
+go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhost:8080 (refresh reloads a growing dump)
 ```
 
-`rfc-viewer` is offline — it reads a capture file, never the network; `-values`
-includes decoded scalar/table values (may reveal credentials/data).
+`rfc-viewer` is offline — it reads a capture file, never a live SAP system;
+`-values` includes decoded scalar/table values (may reveal credentials/data).
 
 ## Status
 
