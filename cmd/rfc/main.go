@@ -19,18 +19,36 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oisee/open-rfc-go/cmd/rfctool"
 	"github.com/oisee/open-rfc-go/rfc"
 )
 
+var systemName string
+
 func main() {
-	if len(os.Args) < 2 {
+	args := stripSystemFlag(os.Args[1:])
+	if len(args) < 1 {
 		usage()
 		os.Exit(2)
 	}
-	if err := run(os.Args[1], os.Args[2:]); err != nil {
+	if err := run(args[0], args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "rfc:", err)
 		os.Exit(1)
 	}
+}
+
+// stripSystemFlag pulls a global -s/--system <name> out of the argument list.
+func stripSystemFlag(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "-s" || args[i] == "--system") && i+1 < len(args) {
+			systemName = args[i+1]
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func usage() {
@@ -52,8 +70,11 @@ Flags:
   --top <N>                    read-table / search row limit
   --group <name>               search: restrict to a function group (PNAME mask)
 
-Connection via env: SAP_ASHOST, SAP_SYSNR (00), SAP_CLIENT (001), SAP_USER,
-SAP_PASSWORD/SAP_PASSWD, SAP_LANG (EN).
+Global:
+  -s, --system <name>          pick a system from .rfc.json
+
+Connection: .rfc.json (named systems) and/or env SAP_ASHOST, SAP_SYSNR (00),
+SAP_CLIENT (001), SAP_USER, SAP_PASSWORD/SAP_PASSWD, SAP_LANG (EN) — env wins.
 `)
 }
 
@@ -159,29 +180,7 @@ func readParams(args []string) (rfc.Params, error) {
 }
 
 func withClient(ctx context.Context, fn func(*rfc.Client) error) error {
-	host := os.Getenv("SAP_ASHOST")
-	if host == "" {
-		return fmt.Errorf("SAP_ASHOST is required")
-	}
-	sysnr := envOr("SAP_SYSNR", "00")
-	n, err := strconv.Atoi(sysnr)
-	if err != nil {
-		return fmt.Errorf("SAP_SYSNR must be numeric: %q", sysnr)
-	}
-	pass := os.Getenv("SAP_PASSWORD")
-	if pass == "" {
-		pass = os.Getenv("SAP_PASSWD")
-	}
-	lang := envOr("SAP_LANG", "EN")
-	c, err := rfc.Open(ctx, rfc.Destination{
-		Host:     host,
-		Port:     3300 + n,
-		Service:  fmt.Sprintf("sapdp%02d", n),
-		Client:   envOr("SAP_CLIENT", "001"),
-		User:     os.Getenv("SAP_USER"),
-		Password: pass,
-		Language: string([]rune(strings.ToUpper(lang))[0:1]),
-	})
+	c, _, err := rfctool.Open(ctx, systemName)
 	if err != nil {
 		return err
 	}
@@ -197,7 +196,6 @@ func emit(v any) error {
 	fmt.Println(string(b))
 	return nil
 }
-
 
 // hasFlag reports whether a boolean --name flag is present in args.
 func hasFlag(args []string, name string) bool {
@@ -242,7 +240,7 @@ func runSearch(ctx context.Context, args []string) error {
 		}
 	}
 	return withClient(ctx, func(c *rfc.Client) error {
-		rows, err := readTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, "|", top)
+		rows, err := rfctool.ReadTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, top)
 		if err != nil {
 			return err
 		}
@@ -263,10 +261,6 @@ func runReadTable(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	delim := "|"
-	if d, ok := flagValue(args, "--delimiter"); ok {
-		delim = d
-	}
 	top := 0
 	if v, ok := flagValue(args, "--top"); ok {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -274,57 +268,10 @@ func runReadTable(ctx context.Context, args []string) error {
 		}
 	}
 	return withClient(ctx, func(c *rfc.Client) error {
-		rows, err := readTable(ctx, c, table, where, fields, delim, top)
+		rows, err := rfctool.ReadTable(ctx, c, table, where, fields, top)
 		if err != nil {
 			return err
 		}
 		return emit(rows)
 	})
-}
-
-// readTable runs RFC_READ_TABLE and splits each returned row into columns by the
-// FIELDS metadata the call returns.
-func readTable(ctx context.Context, c *rfc.Client, table, where string, fields []string, delim string, top int) ([]map[string]string, error) {
-	in := rfc.Params{"QUERY_TABLE": table, "DELIMITER": delim}
-	if top > 0 {
-		in["ROWCOUNT"] = int64(top)
-	}
-	if where != "" {
-		in["OPTIONS"] = []map[string]any{{"TEXT": where}}
-	}
-	if len(fields) > 0 {
-		fs := make([]map[string]any, 0, len(fields))
-		for _, f := range fields {
-			fs = append(fs, map[string]any{"FIELDNAME": f})
-		}
-		in["FIELDS"] = fs
-	}
-	r, err := c.Call(ctx, "RFC_READ_TABLE", in)
-	if err != nil {
-		return nil, err
-	}
-	var cols []string
-	for _, fr := range r.Table("FIELDS") {
-		cols = append(cols, strings.TrimSpace(fmt.Sprint(fr["FIELDNAME"])))
-	}
-	var out []map[string]string
-	for _, dr := range r.Table("DATA") {
-		wa := fmt.Sprint(dr["WA"])
-		parts := strings.Split(wa, delim)
-		row := map[string]string{}
-		for i, col := range cols {
-			if i < len(parts) {
-				row[col] = strings.TrimRight(parts[i], " ")
-			}
-		}
-		out = append(out, row)
-	}
-	return out, nil
-}
-
-func envOr(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
 }

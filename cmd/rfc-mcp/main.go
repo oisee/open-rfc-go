@@ -4,9 +4,12 @@
 // RFC client as a small set of generic tools: rfc_info, rfc_ping, rfc_describe,
 // rfc_search, rfc_read_table, and rfc_call. `rfc_describe` returns an FM interface
 // as an MCP-tool JSON Schema; `rfc_call` runs any function module with native
-// JSON arguments (the client coerces them per the interface). Connection is taken
-// from the environment (SAP_ASHOST/SYSNR/CLIENT/USER/PASSWORD/LANG); pass
-// --read-only to disable rfc_call.
+// JSON arguments (the client coerces them per the interface).
+//
+// Configuration comes from three sources (later wins): .rfc.json (named systems
+// with expose/hide/readOnly), environment (SAP_ASHOST/SYSNR/CLIENT/USER/PASSWORD/
+// LANG), and flags: -s/--system <name>, --expose <masks>, --hide <masks>, --max N,
+// --read-only. --expose turns matching RFC-enabled FMs into per-FM MCP tools.
 //
 // Transport: newline-delimited JSON-RPC 2.0 on stdin/stdout, no dependencies.
 package main
@@ -22,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/oisee/open-rfc-go/cmd/rfctool"
 	"github.com/oisee/open-rfc-go/rfc"
 )
 
@@ -32,32 +36,55 @@ var (
 	exposeMasks []string // green-list FM name masks (* wildcard) -> per-FM MCP tools
 	hideMasks   []string // red-list masks, excluded from the green-list
 	maxTools    = 200
+	mcpSystem   string
 )
 
 func main() {
+	var exposeSet, hideSet, readOnlySet, maxSet bool
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--read-only":
-			readOnly = true
+			readOnly, readOnlySet = true, true
 		case "--expose":
 			if i+1 < len(args) {
 				exposeMasks = append(exposeMasks, splitMasks(args[i+1])...)
+				exposeSet = true
 				i++
 			}
 		case "--hide":
 			if i+1 < len(args) {
 				hideMasks = append(hideMasks, splitMasks(args[i+1])...)
+				hideSet = true
 				i++
 			}
 		case "--max":
 			if i+1 < len(args) {
 				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					maxTools = n
+					maxTools, maxSet = n, true
 				}
 				i++
 			}
+		case "--system", "-s":
+			if i+1 < len(args) {
+				mcpSystem = args[i+1]
+				i++
+			}
 		}
+	}
+	// Config (.rfc.json) provides defaults; command-line flags win.
+	opts := rfctool.LoadOptions(mcpSystem)
+	if !exposeSet {
+		exposeMasks = opts.Expose
+	}
+	if !hideSet {
+		hideMasks = opts.Hide
+	}
+	if !readOnlySet {
+		readOnly = opts.ReadOnly
+	}
+	if !maxSet && opts.MaxTools > 0 {
+		maxTools = opts.MaxTools
 	}
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1024*1024), 16*1024*1024)
@@ -192,7 +219,7 @@ func resolveExposed(ctx context.Context) []map[string]any {
 		var candidates []string
 		for _, m := range exposeMasks {
 			like := strings.ReplaceAll(strings.ToUpper(m), "*", "%")
-			rows, err := readTable(ctx, c, "TFDIR", "FMODE = 'R' AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
+			rows, err := rfctool.ReadTable(ctx, c, "TFDIR", "FMODE = 'R' AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "rfc-mcp: expose:", err)
 				continue
@@ -351,7 +378,7 @@ func search(ctx context.Context, c *rfc.Client, a map[string]any) (any, error) {
 		where += " AND PNAME LIKE 'SAPL" + strings.ToUpper(strings.ReplaceAll(g, "*", "%")) + "%'"
 	}
 	top := intVal(a["top"], 100)
-	return readTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, top)
+	return rfctool.ReadTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, top)
 }
 
 func readTableArgs(ctx context.Context, c *rfc.Client, a map[string]any) (any, error) {
@@ -361,44 +388,7 @@ func readTableArgs(ctx context.Context, c *rfc.Client, a map[string]any) (any, e
 			fields = append(fields, strings.ToUpper(strVal(f)))
 		}
 	}
-	return readTable(ctx, c, strings.ToUpper(strVal(a["table"])), strVal(a["where"]), fields, intVal(a["top"], 0))
-}
-
-func readTable(ctx context.Context, c *rfc.Client, table, where string, fields []string, top int) ([]map[string]string, error) {
-	in := rfc.Params{"QUERY_TABLE": table, "DELIMITER": "|"}
-	if top > 0 {
-		in["ROWCOUNT"] = int64(top)
-	}
-	if where != "" {
-		in["OPTIONS"] = []map[string]any{{"TEXT": where}}
-	}
-	if len(fields) > 0 {
-		fs := make([]map[string]any, 0, len(fields))
-		for _, f := range fields {
-			fs = append(fs, map[string]any{"FIELDNAME": f})
-		}
-		in["FIELDS"] = fs
-	}
-	r, err := c.Call(ctx, "RFC_READ_TABLE", in)
-	if err != nil {
-		return nil, err
-	}
-	var cols []string
-	for _, fr := range r.Table("FIELDS") {
-		cols = append(cols, strings.TrimSpace(fmt.Sprint(fr["FIELDNAME"])))
-	}
-	var out []map[string]string
-	for _, dr := range r.Table("DATA") {
-		parts := strings.Split(fmt.Sprint(dr["WA"]), "|")
-		row := map[string]string{}
-		for i, col := range cols {
-			if i < len(parts) {
-				row[col] = strings.TrimRight(parts[i], " ")
-			}
-		}
-		out = append(out, row)
-	}
-	return out, nil
+	return rfctool.ReadTable(ctx, c, strings.ToUpper(strVal(a["table"])), strVal(a["where"]), fields, intVal(a["top"], 0))
 }
 
 func strVal(v any) string { s, _ := v.(string); return s }
@@ -428,33 +418,7 @@ var (
 
 func client(ctx context.Context) (*rfc.Client, error) {
 	clientOnce.Do(func() {
-		host := os.Getenv("SAP_ASHOST")
-		if host == "" {
-			clientErr = fmt.Errorf("SAP_ASHOST is required")
-			return
-		}
-		n, err := strconv.Atoi(envOr("SAP_SYSNR", "00"))
-		if err != nil {
-			clientErr = fmt.Errorf("SAP_SYSNR must be numeric")
-			return
-		}
-		pass := os.Getenv("SAP_PASSWORD")
-		if pass == "" {
-			pass = os.Getenv("SAP_PASSWD")
-		}
-		lang := envOr("SAP_LANG", "EN")
-		sharedC, clientErr = rfc.Open(ctx, rfc.Destination{
-			Host: host, Port: 3300 + n, Service: fmt.Sprintf("sapdp%02d", n),
-			Client: envOr("SAP_CLIENT", "001"), User: os.Getenv("SAP_USER"),
-			Password: pass, Language: string([]rune(strings.ToUpper(lang))[0:1]),
-		})
+		sharedC, _, clientErr = rfctool.Open(ctx, mcpSystem)
 	})
 	return sharedC, clientErr
-}
-
-func envOr(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
 }
