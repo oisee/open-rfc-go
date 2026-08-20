@@ -617,6 +617,8 @@ func (p *rparser) finish() error {
 }
 
 func recursiveBase64Decode(v, path string, maximum int) ([]byte, int, error) {
+	// The server wraps an XSTRING cell at 76 columns; see unwrapBase64.
+	v = unwrapBase64(v)
 	if len(v) > maximum || len(v)&3 != 0 || !canonicalBase64.MatchString(v) {
 		return nil, 0, fmt.Errorf("%w: %s contains non-canonical base64", ErrProtocol, path)
 	}

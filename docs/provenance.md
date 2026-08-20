@@ -124,6 +124,16 @@ git -C ../open-rfc log --oneline 847036d..origin/main -- src/protocol/ni.ts
 | `src/metadata/immutable-map.ts` (+ its `isImmutableMetadataMap` trust predicate) | A wrapper that hides a `Map` behind private state because `Object.freeze(new Map())` stays mutable through `Map.prototype.set()`, plus a trust predicate for the (dropped) `rfc-value-snapshot` walk. Go gives immutability by keeping a native `map` in an unexported struct field with no exported mutators, so the wrapper has no Go analogue; metadata snapshots hold their entries in plain Go maps. |
 | `test/modern-recursive-metadata.test.ts` | Tests `src/compat/modern-metadata.ts` (`toModernRfcMetadataFromRecursiveGraph`), the node-rfc-shaped projection of the recursive graph. `src/compat/**` is out of scope (no Go consumer), so this test has no Go analogue; the recursive-metadata core is covered by `test/recursive-metadata.test.ts`. |
 
+## Deliberate divergences from upstream
+
+A bug fix that upstream does not (yet) have. Each row is a wire fact observed
+on a live system, not a preference; report it upstream and drop the row when
+the fix lands there.
+
+| open-rfc-go file | Divergence | Evidence |
+|---|---|---|
+| `internal/xrfc/classic_xrfc.go` (`unwrapBase64`, used by `DecodeBase64` and by `recursiveBase64Decode` in `internal/xrfc/recursive_xrfc_codec.go`) | Upstream validates an XSTRING cell's base64 verbatim: `length % 4 == 0`, the strict alphabet regex, and a re-encode round trip. The ABAP xRFC serializer emits base64 **MIME line-wrapped at 76 columns with a bare LF**, so every XSTRING longer than 57 bytes is rejected as "non-canonical base64". We strip CR/LF (only CR/LF) before the checks; the alphabet, length, padding and round-trip checks then run unchanged on the joined text, so embedded spaces, a non-standard alphabet and non-zero padding bits stay rejected. | A4H, SAP_BASIS 758/kernel 793: `SADT_REST_RFC_ENDPOINT` returned `RESPONSE.MESSAGE_BODY` as 404,172 bytes of base64 in 5,249 lines of exactly 76 characters (299,191 bytes decoded). Regression tests: `TestDecodeBase64LineWrapped`, `TestRCDecodeLineWrappedBase64`. |
+
 ## Rules for adding to this table
 
 - A ported file carries an SPDX header naming its upstream file and commit.

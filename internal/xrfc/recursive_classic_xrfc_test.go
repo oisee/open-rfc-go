@@ -236,3 +236,35 @@ func FuzzDecodeRecursiveClassic(f *testing.F) {
 		_, _ = DecodeRecursiveClassic(resolved, data, RecursiveClassicLimits{})
 	})
 }
+
+// TestRCDecodeLineWrappedBase64 pins the live-wire fact that motivates
+// unwrapBase64: the ABAP xRFC serializer breaks an XSTRING cell every 76
+// columns with a bare LF, so a decoder that validates the raw cell text
+// rejects every XSTRING longer than 57 bytes. Whitespace that is not a line
+// break, and a non-canonical value spread over several lines, must still be
+// rejected.
+func TestRCDecodeLineWrappedBase64(t *testing.T) {
+	resolved, err := ResolveRecursiveClassic(rcGraph(), rcIdentity, RecursiveClassicLimits{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	wrapped := replaceOnce(rcExpectedXML, "<DATA>3q2+7w==</DATA>", "<DATA>3q2+\n7w==</DATA>")
+	decoded, err := DecodeRecursiveClassic(resolved, []byte(wrapped), RecursiveClassicLimits{})
+	if err != nil {
+		t.Fatalf("wrapped base64: %v", err)
+	}
+	if !reflect.DeepEqual(decoded, any(rcValue(t))) {
+		t.Fatalf("wrapped round-trip mismatch:\n got %#v\nwant %#v", decoded, rcValue(t))
+	}
+	for name, cell := range map[string]string{
+		"space":             "3q2+ 7w==",
+		"wrapped and short": "3q2+\n7w=",
+	} {
+		bad := replaceOnce(rcExpectedXML, "<DATA>3q2+7w==</DATA>", "<DATA>"+cell+"</DATA>")
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeRecursiveClassic(resolved, []byte(bad), RecursiveClassicLimits{}); err == nil {
+				t.Fatalf("expected error for %q", cell)
+			}
+		})
+	}
+}

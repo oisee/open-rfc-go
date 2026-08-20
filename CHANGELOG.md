@@ -5,6 +5,29 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 [`docs/discoveries/`](docs/discoveries/); the porting plan is in
 [`docs/porting-plan.md`](docs/porting-plan.md).
 
+## Client — ADT REST over classic RFC — 2026-08-21
+
+A real ADT REST request now travels through the classic-RFC tunnel:
+`SADT_REST_RFC_ENDPOINT` answers `GET /sap/bc/adt/discovery` with HTTP 200 and
+a 299 KB `application/atomsvc+xml` body, and an ADT source read returns the
+program text with its `ETag` and `Last-Modified` headers. No ICF, no HTTP port.
+
+- **Root cause of the earlier failure: line-wrapped base64.** The ABAP xRFC
+  serializer emits an XSTRING cell as base64 broken every 76 columns with a
+  bare LF. Both xRFC decoders validated the raw cell text, so every XSTRING
+  longer than 57 bytes failed with "non-canonical base64" — which is every
+  real HTTP body. `unwrapBase64` now joins the lines before the canonicality
+  checks, which are otherwise unchanged (spaces, a non-standard alphabet and
+  non-zero padding bits are still rejected). See `docs/provenance.md`.
+- **`TFDIR-FMODE` has two remote values, not one.** `'R'` is a remote-enabled
+  module; `'X'` is a remote-enabled module whose interface is basXML-capable —
+  SAP flags every FM carrying deep/nested parameters that way, including
+  `SADT_REST_RFC_ENDPOINT` and `SADT_PROTECTED_DISCOVERY`.
+  `RFC_GET_FUNCTION_INTERFACE` returns `FMODE` verbatim in `REMOTE_CALL` and
+  sets `REMOTE_BASXML_SUPPORTED` exactly when it is `'X'`. `rfc search` and the
+  MCP tool listing filtered on `FMODE = 'R'` and so hid those modules
+  entirely; both now accept `'R'` and `'X'`.
+
 ## Client — recursive (nested) metadata — 2026-08-20
 
 `rfc.Client` can now call and describe function modules whose parameters are
