@@ -75,6 +75,10 @@ func (c *Client) Call(ctx context.Context, functionName string, in Params) (Resu
 	resolve := func(name string) (rfctypes.RfcStructureDefinition, error) {
 		return c.structureDefinitionOn(ctx, sess, name)
 	}
+	in, err = coerceParams(iface, in, resolve)
+	if err != nil {
+		return Result{}, err
+	}
 	input, err := encodeCall(iface, in, resolve)
 	if err != nil {
 		return Result{}, err

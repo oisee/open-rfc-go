@@ -81,10 +81,12 @@ func sanitizeToolName(fm string) string {
 // paramSchema maps one function parameter to a JSON Schema fragment.
 func paramSchema(p classicrfc.FunintParameter, resolve func(string) map[string]any) map[string]any {
 	switch {
+	// A TABLES parameter (class T) is an array even though its row EXID is a
+	// structure (u/v) — check the class before the structure EXID.
+	case p.ParameterClass == "T" || isTableExid(p.Exid):
+		return map[string]any{"type": "array", "items": resolve(p.TableName)}
 	case isStructureExid(p.Exid):
 		return resolve(p.TableName)
-	case isTableExid(p.Exid) || p.ParameterClass == "T":
-		return map[string]any{"type": "array", "items": resolve(p.TableName)}
 	}
 	sc := fieldSchema(p.Exid, p.InternalLength, p.Decimals)
 	if p.ParameterText != "" {

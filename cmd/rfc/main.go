@@ -40,11 +40,17 @@ Usage:
   rfc info                     show system info (RFC_SYSTEM_INFO)
   rfc describe <FM>            print the FM interface as an MCP-tool JSON Schema
   rfc call <FM> [json]         call the FM; params as inline JSON, --file, or --stdin
+  rfc search <pattern>         find RFC-enabled FMs (name mask, * wildcard; --all = any)
+  rfc read-table <table>       read a table (RFC_READ_TABLE) as rows of columns
   rfc ping                     connection test (RFC_PING)
 
 Flags:
   --file <path>                read call params (JSON object) from a file
   --stdin                      read call params (JSON object) from stdin
+  --where <clause>             read-table WHERE clause
+  --fields <a,b,c>             read-table column list
+  --top <N>                    read-table / search row limit
+  --group <name>               search: restrict to a function group (PNAME mask)
 
 Connection via env: SAP_ASHOST, SAP_SYSNR (00), SAP_CLIENT (001), SAP_USER,
 SAP_PASSWORD/SAP_PASSWD, SAP_LANG (EN).
@@ -97,6 +103,16 @@ func run(cmd string, args []string) error {
 			}
 			return emit(r)
 		})
+	case "search":
+		if len(args) < 1 {
+			return fmt.Errorf("usage: rfc search <pattern>")
+		}
+		return runSearch(ctx, args)
+	case "read-table", "read_table", "readtable":
+		if len(args) < 1 {
+			return fmt.Errorf("usage: rfc read-table <table> [--where ..] [--fields ..] [--top N]")
+		}
+		return runReadTable(ctx, args)
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", cmd)
@@ -137,50 +153,9 @@ func readParams(args []string) (rfc.Params, error) {
 	if err := dec.Decode(&obj); err != nil {
 		return nil, fmt.Errorf("params must be a JSON object: %w", err)
 	}
-	return normalizeObject(obj), nil
-}
-
-// normalizeObject/normalizeValue convert decoded JSON into the native Go shapes
-// the client expects: json.Number -> int64/float64, arrays of objects ->
-// []map[string]any (tables), objects -> map[string]any (structures).
-func normalizeObject(m map[string]any) map[string]any {
-	for k, v := range m {
-		m[k] = normalizeValue(v)
-	}
-	return m
-}
-
-func normalizeValue(v any) any {
-	switch t := v.(type) {
-	case json.Number:
-		if i, err := t.Int64(); err == nil {
-			return i
-		}
-		if f, err := t.Float64(); err == nil {
-			return f
-		}
-		return t.String()
-	case map[string]any:
-		return normalizeObject(t)
-	case []any:
-		norm := make([]any, len(t))
-		allObj := len(t) > 0
-		for i, x := range t {
-			norm[i] = normalizeValue(x)
-			if _, ok := norm[i].(map[string]any); !ok {
-				allObj = false
-			}
-		}
-		if allObj {
-			rows := make([]map[string]any, len(norm))
-			for i := range norm {
-				rows[i] = norm[i].(map[string]any)
-			}
-			return rows
-		}
-		return norm
-	}
-	return v
+	// Values stay JSON-native (json.Number, []any, nested maps); Client.Call
+	// coerces them to the exact types each parameter expects (interface-aware).
+	return obj, nil
 }
 
 func withClient(ctx context.Context, fn func(*rfc.Client) error) error {
@@ -221,6 +196,130 @@ func emit(v any) error {
 	}
 	fmt.Println(string(b))
 	return nil
+}
+
+
+// hasFlag reports whether a boolean --name flag is present in args.
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
+}
+
+// flagValue returns the value after --name in args, and true if present.
+func flagValue(args []string, name string) (string, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == name {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+// runSearch lists function modules whose name matches a mask (* wildcard),
+// via RFC_READ_TABLE over TFDIR.
+func runSearch(ctx context.Context, args []string) error {
+	pattern := strings.ToUpper(args[0])
+	like := strings.ReplaceAll(pattern, "*", "%")
+	if !strings.Contains(like, "%") {
+		like = "%" + like + "%"
+	}
+	where := "FUNCNAME LIKE '" + like + "'"
+	// Default to RFC-enabled modules only (TFDIR-FMODE = 'R'); --all lifts it.
+	if !hasFlag(args, "--all") {
+		where += " AND FMODE = 'R'"
+	}
+	if g, ok := flagValue(args, "--group"); ok {
+		where += " AND PNAME LIKE 'SAPL" + strings.ToUpper(strings.ReplaceAll(g, "*", "%")) + "%'"
+	}
+	top := 100
+	if v, ok := flagValue(args, "--top"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			top = n
+		}
+	}
+	return withClient(ctx, func(c *rfc.Client) error {
+		rows, err := readTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, "|", top)
+		if err != nil {
+			return err
+		}
+		return emit(rows)
+	})
+}
+
+// runReadTable reads a table's rows through RFC_READ_TABLE and returns each row
+// as a column->value object.
+func runReadTable(ctx context.Context, args []string) error {
+	table := strings.ToUpper(args[0])
+	where, _ := flagValue(args, "--where")
+	var fields []string
+	if f, ok := flagValue(args, "--fields"); ok {
+		for _, x := range strings.Split(f, ",") {
+			if x = strings.TrimSpace(x); x != "" {
+				fields = append(fields, strings.ToUpper(x))
+			}
+		}
+	}
+	delim := "|"
+	if d, ok := flagValue(args, "--delimiter"); ok {
+		delim = d
+	}
+	top := 0
+	if v, ok := flagValue(args, "--top"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			top = n
+		}
+	}
+	return withClient(ctx, func(c *rfc.Client) error {
+		rows, err := readTable(ctx, c, table, where, fields, delim, top)
+		if err != nil {
+			return err
+		}
+		return emit(rows)
+	})
+}
+
+// readTable runs RFC_READ_TABLE and splits each returned row into columns by the
+// FIELDS metadata the call returns.
+func readTable(ctx context.Context, c *rfc.Client, table, where string, fields []string, delim string, top int) ([]map[string]string, error) {
+	in := rfc.Params{"QUERY_TABLE": table, "DELIMITER": delim}
+	if top > 0 {
+		in["ROWCOUNT"] = int64(top)
+	}
+	if where != "" {
+		in["OPTIONS"] = []map[string]any{{"TEXT": where}}
+	}
+	if len(fields) > 0 {
+		fs := make([]map[string]any, 0, len(fields))
+		for _, f := range fields {
+			fs = append(fs, map[string]any{"FIELDNAME": f})
+		}
+		in["FIELDS"] = fs
+	}
+	r, err := c.Call(ctx, "RFC_READ_TABLE", in)
+	if err != nil {
+		return nil, err
+	}
+	var cols []string
+	for _, fr := range r.Table("FIELDS") {
+		cols = append(cols, strings.TrimSpace(fmt.Sprint(fr["FIELDNAME"])))
+	}
+	var out []map[string]string
+	for _, dr := range r.Table("DATA") {
+		wa := fmt.Sprint(dr["WA"])
+		parts := strings.Split(wa, delim)
+		row := map[string]string{}
+		for i, col := range cols {
+			if i < len(parts) {
+				row[col] = strings.TrimRight(parts[i], " ")
+			}
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 func envOr(k, d string) string {

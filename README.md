@@ -70,8 +70,8 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Tooling** | planned: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`) and an MCP server (`cmd/rfc-mcp`) — `describe <FM>` emits the FM interface as an MCP-tool JSON Schema; generic `call` runs any FM. Built as an extractable subproject |
-| **Next** | RFC tool surface; RFC callback (server→client) on the client; finish the generating server |
+| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`cmd/rfc-mcp`, stdio) — `describe <FM>` emits the FM interface as an MCP-tool JSON Schema; generic `call` runs any FM (JSON args, coerced per interface). Dependency-free, extractable subproject |
+| **Next** | RFC callback (server→client) on the client; per-FM MCP tools for a curated allowlist; finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 
