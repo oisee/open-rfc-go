@@ -2,8 +2,27 @@
 
 Design report (2026-08-19), grounded in the actual code. Milestones M1–M5 are
 done and verified live against A4H; M6 (pool, lifecycle, SAProuter route codec,
-SOCKS5) has landed. The whole implementation lives under `internal/`; the public
-`rfc/` package is still an empty placeholder.
+SOCKS5) has landed.
+
+> **Update — 2026-08-20.** Several P0/P1 items below are now **done** and
+> verified live against A4H (.105): the public **`rfc` package** (`Open`/`Call`,
+> native values, typed `*ABAPException`, metadata cache), **deep/nested xRFC**
+> live round-trip (`STFC_DEEP_STRUCTURE`/`STFC_DEEP_TABLE`, STRING/XSTRING), and
+> **every scalar type** (incl. STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP,
+> FLOAT, UTCLONG). The client now calls essentially any FM. Two new tracks are
+> added below: an **RFC tool surface** (`cmd/rfc` CLI + `cmd/rfc-mcp`) and
+> **RFC callback** support.
+
+## New tracks (added 2026-08-20)
+
+| Rank | Item | Rationale |
+|---|---|---|
+| **P0** | RFC tool surface — `cmd/rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) + `cmd/rfc-mcp` | Make the comprehensive client usable by humans and by MCP-trained models. `describe <FM>` emits the FM interface as an **MCP-tool JSON Schema** (validated prototype); one mapper feeds both the CLI printout and dynamically-registered MCP tools for a curated FM allowlist. Generic `call` executes any FM (RFC has too many FMs to pre-generate per-FM tools — describe+call, vsp-style, not odata-mcp per-entity). Build as a subproject (core `rfc` stays dependency-free; CLI on stdlib flag), extractable into a standalone repo later. |
+| **P1** | RFC **callback** (server→client, DESTINATION 'BACK') on the client | Classic synchronous RFC lets a called FM call back a function module in the caller over the same, re-entrant conversation (`STFC_CONNECTION_BACK`; `STFC_CONNECTION` in some configs). Today the client's `exchange` is one-send/one-receive and would mis-decode an incoming callback request as a response. Needs a re-entrant call loop that dispatches inbound function requests to a **client-side callback-handler registry**, replies, and resumes until the real response. (The content-addressed server can already *replay* callbacks; the conscious server does not originate them.) |
+| **P2** | Safety gate for the MCP `call` tool (`--read-only` / write-FM allowlist) | RFC FMs can mutate (BAPI + COMMIT) but don't declare side-effects; the MCP server needs a read-only mode / allowlist like odata-mcp. |
+
+The whole wire implementation lives under `internal/`; the public `rfc/` package
+is now real and consumable (the P0 that unblocked all of the above).
 
 The wire-level port is in excellent shape and, in several respects
 (compile-enforced layering, race-proven connection ownership, type-erased guard
@@ -15,14 +34,14 @@ trustworthy than the TypeScript original**. The gap between "correct codecs" and
 
 | Rank | Item | Rationale |
 |---|---|---|
-| **P0** | Public `rfc` package (typed `Client`/`Destination`/`Call`) | The full resolve→encode→call→decode pipeline exists only in tests (`live_explore_test.go`); there is no consumable API. Prerequisite for MCP, debug-trace, codegen, RFC-server. |
-| **P0** | Surface the ABAP error envelope through the call boundary | `cpic` decodes a rich `rfcerr.Envelope` (exceptions, MESSAGE, runtime, class-based) but `client.CallResult` discards it — a failed FM currently reduces to `Success:false`. |
+| ✅ **P0 done** | Public `rfc` package (typed `Client`/`Destination`/`Call`) | Landed and live-proven: `rfc.Open`/`Client.Call`, native values, metadata cache. Unblocked the tool surface, xRFC wiring, and scalar coverage. |
+| ✅ **P0 done** | Surface the ABAP error envelope through the call boundary | `Client.Call` now returns a typed `*ABAPException` (key/message/type/number/class), `errors.As`-able; live-verified. |
 | **P0** | Error taxonomy for the public package (`errors.Is/As` tree) | Each internal package has its own sentinels; consumers need one documented set: `ErrLogonRejected`, `*ABAPException`, `ErrProtocol`, `ErrTransport`, `ErrTimeout`, `ErrPoolExhausted`, `ErrClosed`. |
-| **P1** | Metadata repository runtime (cache + in-flight coalescing) | Every typed call needs interface + structure metadata; without a cache each call re-fetches. Upstream had it (`repository-runtime.ts`); deferred here. |
-| **P1** | Deep/nested xRFC live verification (`STFC_DEEP_TABLE/STRUCTURE`) | Recursive codecs are ported + fuzzed but the plan flags deep xRFC as the remaining unproven-live M3b work. Cheap to close. |
+| ✅ **P1 done (cache)** | Metadata repository runtime (cache + in-flight coalescing) | Function-interface and structure-definition caches landed; in-flight coalescing still open. |
+| ✅ **P1 done** | Deep/nested xRFC live verification (`STFC_DEEP_TABLE/STRUCTURE`) | Verified live on .105 (2026-08-20): deep structures & tables round-trip incl. STRING/XSTRING; xRFC codec wired into `rfc.Call`. |
 | **P1** | Codegen: DDIC metadata → typed Go structs (`rfcgen`) | The normalized graph + `RfcStructureDefinition` already exist; the single highest-leverage ergonomic differentiator over node-rfc/upstream. |
 | **P1** | Observability hooks (`log/slog` + OpenTelemetry) | None today. Greenfield; the "no I/O under a lock" rule makes a clean hook contract easy. |
-| **P1** | Typed `ReadTable` wrapper + message/`BAPIRET2` resolver | The two most-used diagnostic/data primitives; enabler for the debug-trace assistant (`docs/rfc-assistance.md`). |
+| **P1** | Typed `ReadTable` wrapper + message/`BAPIRET2` resolver | The two most-used diagnostic/data primitives; enabler for the debug-trace assistant. Now also folded into `cmd/rfc read-table`. |
 | **P1** | Fuzz the runtime metadata row decoders | `DecodeDdIfDfiesRow`, `DecodeRfcFieldsRow`, `DecodeRfcFunctionInterfaceResult`, `classicrfc.DecodeResult` consume live server bytes but have no fuzz target — violates the port's own "fuzz every decoder" rule. |
 | **P1** | Wire SAProuter + SOCKS5 into the dial path | Both codecs are done and tested in isolation; `transport.Dial` still does a plain `net.Dial`, so routed/proxied dialing is unreachable from the client. |
 | **P2** | tRFC/qRFC/bgRFC transactional units | Valuable for integration; substantial new wire work (TID lifecycle, confirm/commit). |

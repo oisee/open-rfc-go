@@ -70,9 +70,10 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Next** | finish the generating server (dispatch), then Go/JS functions behind a polyglot bridge |
+| **Tooling** | planned: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`) and an MCP server (`cmd/rfc-mcp`) — `describe <FM>` emits the FM interface as an MCP-tool JSON Schema; generic `call` runs any FM. Built as an extractable subproject |
+| **Next** | RFC tool surface; RFC callback (server→client) on the client; finish the generating server |
 
-Full history: [`CHANGELOG.md`](CHANGELOG.md).
+Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Learn more
 
@@ -83,6 +84,7 @@ Full history: [`CHANGELOG.md`](CHANGELOG.md).
 | [Cheat sheet](docs/cheatsheet.md) | ports, auth, constants, commands — one page |
 | [Docs index](docs/README.md) | everything else (primer, glossary, architecture, dev) |
 | [Porting plan](docs/porting-plan.md) | what's next and why in that order |
+| [Roadmap](docs/roadmap.md) | ranked plan — what's done, the tool surface, callbacks, and later bets |
 
 ## Licensing
 
