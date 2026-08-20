@@ -17,9 +17,41 @@ SOCKS5) has landed.
 
 | Rank | Item | Rationale |
 |---|---|---|
-| **P0** | RFC tool surface — `cmd/rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) + `cmd/rfc-mcp` | Make the comprehensive client usable by humans and by MCP-trained models. `describe <FM>` emits the FM interface as an **MCP-tool JSON Schema** (validated prototype); one mapper feeds both the CLI printout and dynamically-registered MCP tools for a curated FM allowlist. Generic `call` executes any FM (RFC has too many FMs to pre-generate per-FM tools — describe+call, vsp-style, not odata-mcp per-entity). Build as a subproject (core `rfc` stays dependency-free; CLI on stdlib flag), extractable into a standalone repo later. |
+| ✅ **P0 done** | RFC tool surface — `cmd/rfc` CLI + `cmd/rfc-mcp` MCP server | Built and live-verified. `cmd/rfc`: info/describe/search/call/read-table/ping. `cmd/rfc-mcp`: JSON-RPC-2.0 stdio server, dependency-free; generic tools rfc_info/ping/describe/search/read_table/call **plus autodiscovery** — `--expose`/`--hide` masks turn matching RFC-enabled FMs into real per-FM MCP tools (inputSchema = the FM's interface). `describe`/per-FM tools share one EXID→JSON-Schema mapper (`Client.DescribeTool`). Config via `.rfc.json` (named systems + expose/hide/readOnly) + env + flags (flags win); shared `cmd/rfctool`. Core `rfc` stays dependency-free; the `cmd/*` set is an extractable subproject. See the design notes below. |
 | **P1** | RFC **callback** (server→client, DESTINATION 'BACK') on the client | Classic synchronous RFC lets a called FM call back a function module in the caller over the same, re-entrant conversation (`STFC_CONNECTION_BACK`; `STFC_CONNECTION` in some configs). Today the client's `exchange` is one-send/one-receive and would mis-decode an incoming callback request as a response. Needs a re-entrant call loop that dispatches inbound function requests to a **client-side callback-handler registry**, replies, and resumes until the real response. (The content-addressed server can already *replay* callbacks; the conscious server does not originate them.) |
-| **P2** | Safety gate for the MCP `call` tool (`--read-only` / write-FM allowlist) | RFC FMs can mutate (BAPI + COMMIT) but don't declare side-effects; the MCP server needs a read-only mode / allowlist like odata-mcp. |
+| **P1** | Safety gate for write FMs in `rfc-mcp` beyond `--read-only` | RFC FMs can mutate (BAPI + COMMIT) but don't declare side-effects. `--read-only` today only drops the generic `rfc_call`; auto-exposed per-FM tools bypass it (the operator curated them). Want: a write-FM heuristic/allowlist, per-tool annotations (`readOnlyHint`), and confirmation semantics. |
+
+### RFC tool surface — design notes & open items (thought through 2026-08-20)
+
+Shipped shape: **generic describe+call** (RFC has tens of thousands of FMs — can't
+pre-generate a tool per FM like odata-mcp does per entity), **plus opt-in
+autodiscovery** that renders a *curated* subset as real per-FM MCP tools. One
+`RFC-interface → JSON-Schema` mapper backs both `rfc describe` and the per-FM
+tools. Three config sources (flags > env > `.rfc.json`), a shared `cmd/rfctool`,
+core stays dependency-free.
+
+Open items / decisions still to make:
+- **Per-FM tool output schema.** Today per-FM tools carry only `inputSchema`; add
+  `outputSchema` (we already compute it) for MCP structured output where clients
+  support it.
+- **Refresh / `tools/list_changed`.** The exposed set resolves once and caches;
+  no notification if FMs appear/change. Fine for stdio; revisit for long-lived HTTP.
+- **Startup cost.** Autodiscovery does one `DescribeTool` (interface + struct
+  fetches) per exposed FM at first `tools/list`; large green-lists are slow.
+  Options: concurrency, a `--max` cap (done), or lazy per-tool describe.
+- **Name collisions & namespaces.** FM names are `RS38L-NAME` (≤30 chars, so under
+  MCP's 64); `/NS/NAME` → `_NS_NAME`. Two different FMs can still sanitize to the
+  same tool name — need a collision policy (suffix) and a reverse map (kept).
+- **Description quality.** Uses FM short text + exceptions; could pull the FM long
+  documentation and per-parameter texts for richer tool descriptions.
+- **Transports.** stdio only; add HTTP/SSE + streamable-HTTP (odata-mcp has them).
+- **Config ergonomics.** `.rfc.json` mirrors `.vsp.json`; consider an
+  `--expose-file` list, SAProuter/SOCKS fields, and a redacted `rfc config`/`rfc
+  systems` command. Never require the password in the file (env supported).
+- **Extraction.** `cmd/rfc`, `cmd/rfc-mcp`, `cmd/rfctool` depend only on public
+  `rfc`; extraction = move them to a new module requiring open-rfc-go.
+- **Library `ReadTable`.** `cmd/rfctool.ReadTable` is a candidate to promote into
+  the public `rfc` package (roadmap P1 "typed ReadTable").
 
 The whole wire implementation lives under `internal/`; the public `rfc/` package
 is now real and consumable (the P0 that unblocked all of the above).
