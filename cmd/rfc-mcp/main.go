@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,12 +27,36 @@ import (
 
 const protocolVersion = "2024-11-05"
 
-var readOnly bool
+var (
+	readOnly    bool
+	exposeMasks []string // green-list FM name masks (* wildcard) -> per-FM MCP tools
+	hideMasks   []string // red-list masks, excluded from the green-list
+	maxTools    = 200
+)
 
 func main() {
-	for _, a := range os.Args[1:] {
-		if a == "--read-only" {
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--read-only":
 			readOnly = true
+		case "--expose":
+			if i+1 < len(args) {
+				exposeMasks = append(exposeMasks, splitMasks(args[i+1])...)
+				i++
+			}
+		case "--hide":
+			if i+1 < len(args) {
+				hideMasks = append(hideMasks, splitMasks(args[i+1])...)
+				i++
+			}
+		case "--max":
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil {
+					maxTools = n
+				}
+				i++
+			}
 		}
 	}
 	in := bufio.NewScanner(os.Stdin)
@@ -124,7 +149,104 @@ func toolList() []map[string]any {
 			"inputSchema": obj(map[string]any{"function": str, "params": map[string]any{"type": "object"}}, "function"),
 		})
 	}
+	// Auto-discovered per-FM tools (from --expose/--hide masks): each exposed FM
+	// becomes a real MCP tool whose inputSchema is the FM's own interface.
+	tools = append(tools, resolveExposed(context.Background())...)
 	return tools
+}
+
+// splitMasks splits a comma-separated list of FM name masks.
+func splitMasks(csv string) []string {
+	var out []string
+	for _, m := range strings.Split(csv, ",") {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+var (
+	exposedOnce  sync.Once
+	exposedTools []map[string]any  // per-FM tool definitions for tools/list
+	exposedFM    map[string]string // MCP tool name -> function module name
+)
+
+// resolveExposed matches the green-list masks against the system's RFC-enabled
+// function modules, drops the red-list, and renders each as an MCP tool from its
+// interface. Resolved once, then cached. Failures degrade to no per-FM tools.
+func resolveExposed(ctx context.Context) []map[string]any {
+	exposedOnce.Do(func() {
+		exposedFM = map[string]string{}
+		if len(exposeMasks) == 0 {
+			return
+		}
+		c, err := client(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rfc-mcp: expose:", err)
+			return
+		}
+		// One query per mask (RFC_READ_TABLE's WHERE rejects OR/parentheses),
+		// deduplicated; precise glob filtering happens client-side below.
+		seen := map[string]bool{}
+		var candidates []string
+		for _, m := range exposeMasks {
+			like := strings.ReplaceAll(strings.ToUpper(m), "*", "%")
+			rows, err := readTable(ctx, c, "TFDIR", "FMODE = 'R' AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "rfc-mcp: expose:", err)
+				continue
+			}
+			for _, r := range rows {
+				if fm := r["FUNCNAME"]; !seen[fm] {
+					seen[fm] = true
+					candidates = append(candidates, fm)
+				}
+			}
+		}
+		for _, fm := range candidates {
+			if !anyGlob(exposeMasks, fm) || anyGlob(hideMasks, fm) {
+				continue
+			}
+			if len(exposedTools) >= maxTools {
+				fmt.Fprintf(os.Stderr, "rfc-mcp: expose: capped at %d tools\n", maxTools)
+				break
+			}
+			tool, err := c.DescribeTool(ctx, fm)
+			if err != nil {
+				continue
+			}
+			exposedFM[tool.Name] = fm
+			exposedTools = append(exposedTools, map[string]any{
+				"name": tool.Name, "description": tool.Description, "inputSchema": tool.InputSchema,
+			})
+		}
+	})
+	return exposedTools
+}
+
+func globMatch(mask, name string) bool {
+	var b strings.Builder
+	b.WriteString("(?i)^")
+	for _, r := range mask {
+		if r == '*' {
+			b.WriteString(".*")
+		} else {
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	return err == nil && re.MatchString(name)
+}
+
+func anyGlob(masks []string, name string) bool {
+	for _, m := range masks {
+		if globMatch(m, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func callTool(raw json.RawMessage) (any, *rpcErr) {
@@ -141,6 +263,16 @@ func callTool(raw json.RawMessage) (any, *rpcErr) {
 		return toolError(err), nil
 	}
 	arg := func(k string) string { s, _ := p.Arguments[k].(string); return s }
+	// Auto-discovered per-FM tool: the tool name maps to an FM; its arguments are
+	// the FM's parameters directly (coerced per the interface by Client.Call).
+	resolveExposed(ctx)
+	if fm, ok := exposedFM[p.Name]; ok {
+		r, err := c.Call(ctx, fm, rfc.Params(p.Arguments))
+		if err != nil {
+			return toolError(err), nil
+		}
+		return toolJSON(r), nil
+	}
 	switch p.Name {
 	case "rfc_info":
 		r, err := c.Call(ctx, "RFC_SYSTEM_INFO", nil)
