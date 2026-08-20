@@ -60,9 +60,17 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			}
 			log("CONNECT: gateway acknowledged")
 		case len(got) >= 48 && got[0] == 0x06 && got[1] == 0x03: // CPIC-init
-			convID = append([]byte(nil), got[40:48]...)
+			convID = append([]byte(nil), got[appcConvOffset:appcConvOffset+8]...)
 			guid = findRFCGUID(got)
-			acc := patchSession(acceptFor(len(got)), convID, guid)
+			// Always serve the classic-only accept (advertises classic via
+			// 0x0512, no fast-ser 0x5001): per SAP docs fast serialization is
+			// used only if BOTH sides support it, so refusing to advertise it
+			// makes the ABAP client fall back to classic (verified live: the
+			// client then sends 0x0201 classic params). acceptFor templates are
+			// kept for the handshake-test ports (see cmd/rfc-lab).
+			template := classicWorkAccept
+			_ = acceptFor
+			acc := patchSession(template, convID, guid)
 			if send(acc) != nil {
 				return
 			}
@@ -91,8 +99,10 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				respCUT, werr = EncodeCutFunctionExceptionResponse(excKey)
 				log(fmt.Sprintf("SESSION: %s -> exception %s", fn, excKey))
 			} else {
-				respCUT, werr = EncodeCutFunctionResponseS4(resp.Exports, resp.Tables, guid, req.RequestedOutputs)
-				log(fmt.Sprintf("SESSION: %s -> generated (%d exports, %d tables)", fn, len(resp.Exports), len(resp.Tables)))
+				// Lean classic response (no 0x0104 S4 block), matching what a
+				// live A4H server sends for a normal call — verified vs .105.
+				respCUT, werr = EncodeCutFunctionResponseClassic(resp.Exports, resp.Tables, guid)
+				log(fmt.Sprintf("SESSION: %s -> generated (%d exports, %d tables, %dB)", fn, len(resp.Exports), len(resp.Tables), len(respCUT)))
 			}
 			if werr != nil {
 				log("SESSION: encode error: " + werr.Error())
