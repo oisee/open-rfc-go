@@ -69,6 +69,19 @@ func (s *Session) DescribeTool(ctx context.Context, functionName string) (ToolSc
 	return s.client.DescribeTool(ctx, functionName)
 }
 
+// Ping keeps an idle pinned session alive (RFC_PING), so a gateway or work-process
+// idle timeout does not drop a conversation that is being held for later calls.
+//
+// A conversation carries one call at a time: while a blocking call is in flight
+// (a debugger listener, say) the session is occupied and must not be pinged —
+// that call keeps the connection busy on its own. Ping the session only between
+// calls; to check a system while a session blocks, call through the Client, which
+// uses another pooled connection.
+func (s *Session) Ping(ctx context.Context) error {
+	_, err := s.Call(ctx, "RFC_PING", nil)
+	return err
+}
+
 // Close returns the pinned connection to the pool. It is idempotent.
 func (s *Session) Close() error {
 	s.mu.Lock()
