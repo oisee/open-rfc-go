@@ -5,19 +5,23 @@
 // APPC record functions, and — where a message reassembles — the CPIC/CUT
 // request and response (function name, parameters, tables, outcome/exception).
 //
-// Output is a human-readable transcript by default, or an annotated JSON
-// document with -json (feed that to the HTML viewer in docs/). Scalar/table
-// VALUES are redacted by default (a capture may contain credentials and data);
-// pass -values to include decoded values.
+// Output is a human-readable transcript by default; -json emits an annotated
+// JSON document; -html writes a self-contained visual inspector next to the
+// capture (same name, .html); -serve <addr> serves that inspector over HTTP,
+// re-decoding on each refresh (so a growing -dump file updates live). Scalar/
+// table VALUES are redacted unless -values (a capture may contain credentials).
 package main
 
 import (
 	"bufio"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/oisee/open-rfc-go/internal/appc"
@@ -83,18 +87,57 @@ type TableView struct {
 	RowSize int    `json:"rowSize"`
 }
 
+//go:embed inspector.html
+var inspectorHTML string
+
 func main() {
 	showValues := flag.Bool("values", false, "include decoded scalar values (may reveal credentials/data)")
-	asJSON := flag.Bool("json", false, "emit an annotated JSON transcript instead of text")
+	asJSON := flag.Bool("json", false, "emit an annotated JSON transcript to stdout instead of text")
+	asHTML := flag.Bool("html", false, "write a self-contained HTML inspector next to the capture (same name, .html)")
+	serveAddr := flag.String("serve", "", "serve the HTML inspector over HTTP at this address (e.g. :8080); refresh reloads the capture")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: rfc-viewer [-json] [-values] <capture.jsonl>")
+		fmt.Fprintln(os.Stderr, "usage: rfc-viewer [-json | -html | -serve :8080] [-values] <capture.jsonl>")
 		os.Exit(2)
 	}
-	f, err := os.Open(flag.Arg(0))
+	path := flag.Arg(0)
+
+	if *serveAddr != "" {
+		if err := serve(*serveAddr, path, *showValues); err != nil {
+			fmt.Fprintln(os.Stderr, "rfc-viewer:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	out, err := decode(path, *showValues)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rfc-viewer:", err)
 		os.Exit(1)
+	}
+
+	switch {
+	case *asHTML:
+		outPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".html"
+		if err := os.WriteFile(outPath, []byte(renderHTML(out, false)), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "rfc-viewer:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "rfc-viewer: wrote "+outPath)
+	case *asJSON:
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(map[string]any{"frames": out})
+	default:
+		renderText(out)
+	}
+}
+
+// decode reads a JSONL capture and returns the annotated frames.
+func decode(path string, showValues bool) ([]Annotation, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer f.Close()
 
@@ -147,23 +190,54 @@ func main() {
 		messages, perr := dec.Push(payload)
 		if perr == nil {
 			for _, m := range messages {
-				a.CUT = describeMessage(m.Data, *showValues)
+				a.CUT = describeMessage(m.Data, showValues)
 			}
 		}
 		out = append(out, a)
 	}
 	if err := sc.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "rfc-viewer:", err)
-		os.Exit(1)
+		return nil, err
 	}
+	return out, nil
+}
 
-	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(map[string]any{"frames": out})
-		return
+// renderHTML embeds the decoded frames into the self-contained inspector page.
+// When fetch is true the page loads its data from frames.json (server mode);
+// otherwise the frames are baked into the file.
+func renderHTML(out []Annotation, fetch bool) string {
+	var script string
+	if fetch {
+		script = `<script>fetch('frames.json').then(r=>r.json()).then(load).catch(e=>alert("load failed: "+e));</script>`
+	} else {
+		b, _ := json.Marshal(map[string]any{"frames": out})
+		script = `<script>load(` + string(b) + `);</script>`
 	}
-	renderText(out)
+	if i := strings.LastIndex(inspectorHTML, "</body>"); i >= 0 {
+		return inspectorHTML[:i] + script + "\n" + inspectorHTML[i:]
+	}
+	return inspectorHTML + "\n" + script
+}
+
+// serve runs the HTML inspector over HTTP. The capture is decoded on each request
+// to frames.json, so refreshing shows new frames as a live -dump file grows.
+func serve(addr, path string, showValues bool) error {
+	page := renderHTML(nil, true)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/frames.json", func(w http.ResponseWriter, r *http.Request) {
+		out, err := decode(path, showValues)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"frames": out})
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, page)
+	})
+	fmt.Fprintf(os.Stderr, "rfc-viewer: serving %s at http://localhost%s  (refresh to reload)\n", path, addr)
+	return http.ListenAndServe(addr, mux)
 }
 
 func renderText(out []Annotation) {
