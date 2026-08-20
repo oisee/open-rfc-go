@@ -154,7 +154,7 @@ func (c *Client) FunctionInterface(ctx context.Context, name string) (metadata.R
 	}
 	lease, err := c.pool.Acquire(ctx)
 	if err != nil {
-		return metadata.RfcFunctionInterface{}, err
+		return metadata.RfcFunctionInterface{}, translate(err)
 	}
 	defer lease.Release()
 	return c.functionInterfaceOn(ctx, lease.Value(), name)
@@ -167,7 +167,7 @@ func (c *Client) StructureDefinition(ctx context.Context, name string) (rfctypes
 	}
 	lease, err := c.pool.Acquire(ctx)
 	if err != nil {
-		return rfctypes.RfcStructureDefinition{}, err
+		return rfctypes.RfcStructureDefinition{}, translate(err)
 	}
 	defer lease.Release()
 	return c.structureDefinitionOn(ctx, lease.Value(), name)
