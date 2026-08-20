@@ -247,7 +247,8 @@ func resolveExposed(ctx context.Context) []map[string]any {
 			}
 			exposedFM[tool.Name] = fm
 			exposedTools = append(exposedTools, map[string]any{
-				"name": tool.Name, "description": tool.Description, "inputSchema": tool.InputSchema,
+				"name": tool.Name, "description": tool.Description,
+				"inputSchema": tool.InputSchema, "outputSchema": tool.OutputSchema,
 			})
 		}
 	})
@@ -353,7 +354,15 @@ func toolJSON(v any) map[string]any {
 	if err != nil {
 		return toolError(err)
 	}
-	return toolText(string(b))
+	res := toolText(string(b))
+	// When the value is a JSON object, also return it as structuredContent so
+	// clients that consume typed output (matching a tool's outputSchema) get it
+	// directly, not only as text.
+	var obj map[string]any
+	if json.Unmarshal(b, &obj) == nil {
+		res["structuredContent"] = obj
+	}
+	return res
 }
 
 func toolText(s string) map[string]any {
