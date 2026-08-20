@@ -67,10 +67,10 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 
 | | state |
 |---|---|
-| **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors |
-| **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies) |
+| **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
+| **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Next** | a server that *generates* responses from values (dispatch), then Go/JS functions behind a polyglot bridge |
+| **Next** | finish the generating server (dispatch), then Go/JS functions behind a polyglot bridge |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md).
 

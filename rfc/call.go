@@ -266,7 +266,34 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		}
 		return append([]byte(nil), b...), nil
 	default:
-		return nil, fmt.Errorf("%w: %s scalar type %s is not yet supported by the typed API", ErrProtocol, p.ParameterName, p.Exid)
+		// DATE(D)/TIME(T)/packed DEC(P, incl. TIMESTAMP)/FLOAT(F)/INT1,2,8/
+		// DECF16,34/UTCLONG(p): reuse the per-field structure codec via a
+		// single-field layout. The value types match those used inside structures.
+		b, err := structure.Encode(scalarFieldDef(p, n), map[string]any{"V": val})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s scalar type %s: %v", ErrProtocol, p.ParameterName, p.Exid, err)
+		}
+		return b, nil
+	}
+}
+
+// scalarFieldDef builds a single-field structure definition so a scalar whose
+// classic type is not in the fast path can be (de)serialized by the per-field
+// structure codec. byteLen is the field's byte width (the target width when
+// encoding, the actual value length when decoding).
+func scalarFieldDef(p classicrfc.FunintParameter, byteLen int) rfctypes.RfcStructureDefinition {
+	return rfctypes.RfcStructureDefinition{
+		Name:       "SCALAR",
+		ByteLength: int32(byteLen),
+		Fields: []rfctypes.RfcStructureField{{
+			TableName:      "SCALAR",
+			FieldName:      "V",
+			Position:       1,
+			Offset:         0,
+			InternalLength: int32(byteLen),
+			Decimals:       p.Decimals,
+			Exid:           p.Exid,
+		}},
 	}
 }
 
@@ -387,8 +414,14 @@ func decodeScalar(p classicrfc.FunintParameter, b []byte) (any, error) {
 		// XSTRING: variable-length raw bytes.
 		return append([]byte(nil), b...), nil
 	default:
-		// Unknown scalar type: hand back the raw bytes rather than fail.
-		return append([]byte(nil), b...), nil
+		// DATE/TIME/packed DEC/FLOAT/INT1,2,8/DECF/UTCLONG: decode through the
+		// per-field structure codec, sized to the actual value bytes. Fall back
+		// to raw bytes if the per-field codec cannot read it.
+		m, err := structure.Decode(scalarFieldDef(p, len(b)), b)
+		if err != nil {
+			return append([]byte(nil), b...), nil
+		}
+		return m["V"], nil
 	}
 }
 
