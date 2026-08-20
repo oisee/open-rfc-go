@@ -9,7 +9,8 @@
 // Configuration comes from three sources (later wins): .rfc.json (named systems
 // with expose/hide/readOnly), environment (SAP_ASHOST/SYSNR/CLIENT/USER/PASSWORD/
 // LANG), and flags: -s/--system <name>, --expose <masks>, --hide <masks>, --max N,
-// --read-only. --expose turns matching RFC-enabled FMs into per-FM MCP tools.
+// --read-only, --safe (block/hide heuristically-write FMs), --allow-commit.
+// --expose turns matching RFC-enabled FMs into per-FM MCP tools.
 //
 // Transport: newline-delimited JSON-RPC 2.0 on stdin/stdout, no dependencies.
 package main
@@ -37,6 +38,8 @@ var (
 	hideMasks   []string // red-list masks, excluded from the green-list
 	maxTools    = 200
 	mcpSystem   string
+	safeMode    bool // block heuristically-write FMs
+	allowCommit bool // permit BAPI_TRANSACTION_COMMIT even in --safe
 )
 
 func runMCP(cliArgs []string) error {
@@ -47,6 +50,10 @@ func runMCP(cliArgs []string) error {
 		switch args[i] {
 		case "--read-only":
 			readOnly, readOnlySet = true, true
+		case "--safe":
+			safeMode = true
+		case "--allow-commit":
+			allowCommit = true
 		case "--expose":
 			if i+1 < len(args) {
 				exposeMasks = append(exposeMasks, splitMasks(args[i+1])...)
@@ -163,19 +170,21 @@ func toolList() []map[string]any {
 		return s
 	}
 	str := map[string]any{"type": "string"}
+	ro := map[string]any{"readOnlyHint": true}
 	tools := []map[string]any{
-		{"name": "rfc_info", "description": "SAP system info (RFC_SYSTEM_INFO): sysid, release, host, unicode.", "inputSchema": obj(map[string]any{})},
-		{"name": "rfc_ping", "description": "Connection test (RFC_PING).", "inputSchema": obj(map[string]any{})},
-		{"name": "rfc_describe", "description": "Describe an RFC function module's interface as an MCP-tool JSON Schema (input/output).", "inputSchema": obj(map[string]any{"function": str}, "function")},
+		{"name": "rfc_info", "description": "SAP system info (RFC_SYSTEM_INFO): sysid, release, host, unicode.", "inputSchema": obj(map[string]any{}), "annotations": ro},
+		{"name": "rfc_ping", "description": "Connection test (RFC_PING).", "inputSchema": obj(map[string]any{}), "annotations": ro},
+		{"name": "rfc_describe", "description": "Describe an RFC function module's interface as an MCP-tool JSON Schema (input/output).", "inputSchema": obj(map[string]any{"function": str}, "function"), "annotations": ro},
 		{"name": "rfc_search", "description": "Find RFC-enabled function modules by name mask (* wildcard).", "inputSchema": obj(map[string]any{
-			"pattern": str, "all": map[string]any{"type": "boolean"}, "top": map[string]any{"type": "integer"}, "group": str}, "pattern")},
+			"pattern": str, "all": map[string]any{"type": "boolean"}, "top": map[string]any{"type": "integer"}, "group": str}, "pattern"), "annotations": ro},
 		{"name": "rfc_read_table", "description": "Read a database table via RFC_READ_TABLE.", "inputSchema": obj(map[string]any{
-			"table": str, "where": str, "fields": map[string]any{"type": "array", "items": str}, "top": map[string]any{"type": "integer"}}, "table")},
+			"table": str, "where": str, "fields": map[string]any{"type": "array", "items": str}, "top": map[string]any{"type": "integer"}}, "table"), "annotations": ro},
 	}
 	if !readOnly {
 		tools = append(tools, map[string]any{
 			"name": "rfc_call", "description": "Call any function module with native JSON arguments (coerced per the interface). Use rfc_describe first for the schema.",
 			"inputSchema": obj(map[string]any{"function": str, "params": map[string]any{"type": "object"}}, "function"),
+			"annotations": map[string]any{"readOnlyHint": false},
 		})
 	}
 	// Auto-discovered per-FM tools (from --expose/--hide masks): each exposed FM
@@ -237,6 +246,9 @@ func resolveExposed(ctx context.Context) []map[string]any {
 			if !anyGlob(exposeMasks, fm) || anyGlob(hideMasks, fm) {
 				continue
 			}
+			if safeBlocked(fm) {
+				continue // --safe: don't surface heuristically-write FMs as tools
+			}
 			if len(exposedTools) >= maxTools {
 				fmt.Fprintf(os.Stderr, "rfc-mcp: expose: capped at %d tools\n", maxTools)
 				break
@@ -249,6 +261,7 @@ func resolveExposed(ctx context.Context) []map[string]any {
 			exposedTools = append(exposedTools, map[string]any{
 				"name": tool.Name, "description": tool.Description,
 				"inputSchema": tool.InputSchema, "outputSchema": tool.OutputSchema,
+				"annotations": fmAnnotations(fm),
 			})
 		}
 	})
@@ -297,6 +310,9 @@ func callTool(raw json.RawMessage) (any, *rpcErr) {
 	// the FM's parameters directly (coerced per the interface by Client.Call).
 	resolveExposed(ctx)
 	if fm, ok := exposedFM[p.Name]; ok {
+		if safeBlocked(fm) {
+			return toolError(fmt.Errorf("%s is blocked by --safe (heuristic write); rerun without --safe or use --allow-commit", fm)), nil
+		}
 		r, err := c.Call(ctx, fm, rfc.Params(p.Arguments))
 		if err != nil {
 			return toolError(err), nil
@@ -337,8 +353,12 @@ func callTool(raw json.RawMessage) (any, *rpcErr) {
 		if readOnly {
 			return toolError(fmt.Errorf("rfc_call is disabled (--read-only)")), nil
 		}
+		fn := strings.ToUpper(arg("function"))
+		if safeBlocked(fn) {
+			return toolError(fmt.Errorf("%s is blocked by --safe (heuristic write); rerun without --safe or use --allow-commit", fn)), nil
+		}
 		params, _ := p.Arguments["params"].(map[string]any)
-		r, err := c.Call(ctx, strings.ToUpper(arg("function")), rfc.Params(params))
+		r, err := c.Call(ctx, fn, rfc.Params(params))
 		if err != nil {
 			return toolError(err), nil
 		}
@@ -371,6 +391,47 @@ func toolText(s string) map[string]any {
 
 func toolError(err error) map[string]any {
 	return map[string]any{"content": []map[string]any{{"type": "text", "text": "error: " + err.Error()}}, "isError": true}
+}
+
+// --- write-FM safety (first-cut name heuristic; see docs/design/write-fm-safety.md) ---
+
+var writeVerb = regexp.MustCompile(`(?i)(^|_)(CREATE|CHANGE|UPDATE|DELETE|POST|SET|MODIFY|INSERT|SAVE|COMMIT|CANCEL|REVERSE|MAINTAIN|WRITE|PUT|ADD|REMOVE|ENQUEUE|LOCK|UNLOCK|ACTIVATE|DEACTIVATE|RELEASE|CONFIRM|BOOK|SUBMIT|SEND)`)
+var readVerb = regexp.MustCompile(`(?i)(^|_)(GET|GETLIST|GETDETAIL|READ|CHECK|EXIST|EXISTS|SEARCH|FIND|LIST|SELECT|SHOW|DISPLAY|INFO|PING|COUNT)`)
+
+// fmClass is a first-cut side-effect guess from the FM name: "write" (mutating
+// verb), "read" (query verb), or "unknown". A heuristic, not a guarantee.
+func fmClass(name string) string {
+	u := strings.ToUpper(name)
+	if u == "BAPI_TRANSACTION_COMMIT" || writeVerb.MatchString(u) {
+		return "write"
+	}
+	if readVerb.MatchString(u) {
+		return "read"
+	}
+	return "unknown"
+}
+
+// fmAnnotations maps the class to MCP tool hints.
+func fmAnnotations(name string) map[string]any {
+	switch fmClass(name) {
+	case "write":
+		return map[string]any{"readOnlyHint": false, "destructiveHint": true}
+	case "read":
+		return map[string]any{"readOnlyHint": true, "destructiveHint": false}
+	}
+	return map[string]any{"readOnlyHint": false}
+}
+
+// safeBlocked reports whether --safe forbids calling this FM (writes, and
+// BAPI_TRANSACTION_COMMIT unless --allow-commit).
+func safeBlocked(name string) bool {
+	if !safeMode {
+		return false
+	}
+	if strings.EqualFold(name, "BAPI_TRANSACTION_COMMIT") {
+		return !allowCommit
+	}
+	return fmClass(name) == "write"
 }
 
 // --- RFC helpers ---
