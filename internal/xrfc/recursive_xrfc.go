@@ -81,10 +81,10 @@ func normalizeRecursiveLimits(limits RecursiveLimits) (normalizedRecursiveLimits
 	if out.maxNodes, err = boundedLimit(limits.MaxNodes, defaultRuntimeMaxNodes, absoluteRuntimeMaxNodes, "maxNodes"); err != nil {
 		return out, err
 	}
-	if out.maxRows, err = boundedLimit(limits.MaxRows, cpic.DefaultMaxFieldCount, 0xffff_ffff, "maxRows"); err != nil {
+	if out.maxRows, err = boundedLimit(limits.MaxRows, cpic.DefaultMaxFieldCount, maxUint32Limit, "maxRows"); err != nil {
 		return out, err
 	}
-	if out.maxCells, err = boundedLimit(limits.MaxCells, cpic.DefaultMaxFieldCount, 0xffff_ffff, "maxCells"); err != nil {
+	if out.maxCells, err = boundedLimit(limits.MaxCells, cpic.DefaultMaxFieldCount, maxUint32Limit, "maxCells"); err != nil {
 		return out, err
 	}
 	if out.maxCellBytes, err = boundedLimit(limits.MaxCellBytes, cpic.DefaultMaxFieldLength, cpic.DefaultMaxFieldLength, "maxCellBytes"); err != nil {
