@@ -4,6 +4,18 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 **and** server. No NW RFC SDK, no native library, no cgo. A Go port of
 [`open-rfc`](https://github.com/marianfoo/open-rfc).
 
+> ## 🎉 Call any SAP function module — from Go, the shell, or as MCP tools
+>
+> **2026-08-20 — the client now calls essentially any FM, and an MCP server turns
+> a live SAP system into tools an AI can use.** Every scalar type (incl.
+> STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP, FLOAT, UTCLONG), flat **and
+> deep** structures & tables (STRING/XSTRING via xRFC), and both **classic and
+> fast** serialization on decode — all round-tripped live against A4H, pure Go.
+> On top of that: `rfc describe <FM>` renders any function module as an **MCP-tool
+> JSON Schema**, `rfc call` runs any FM from plain JSON, and **`rfc-mcp`
+> auto-exposes a curated set of FMs as real MCP tools** — point it at your SAP and
+> an assistant can call RFC directly. Zero SAP libraries.
+
 > ## 🎉 Both directions are live against real SAP — with zero SAP libraries
 >
 > **2026-08-19 — open-rfc-go now speaks classic RFC _as the server_, not only the client.**
@@ -63,6 +75,21 @@ go run ./cmd/rfc-sniffer -listen :3300 -target <sap-host>:3300 -dump cap.jsonl
 go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted)
 ```
 
+**Drive RFC from the shell or an AI** — a CLI and an MCP server over the same
+client (connection from `.rfc.json`, env, or flags):
+
+```sh
+export SAP_ASHOST=sap.example SAP_USER=DEVELOPER SAP_PASSWORD=…   # or a .rfc.json system
+
+go run ./cmd/rfc info                                  # system info
+go run ./cmd/rfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
+go run ./cmd/rfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
+go run ./cmd/rfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
+
+# MCP server (stdio): every matching FM becomes a tool an assistant can call
+go run ./cmd/rfc-mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
+```
+
 ## Status
 
 | | state |
@@ -70,8 +97,8 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`cmd/rfc-mcp`, stdio) — `describe <FM>` emits the FM interface as an MCP-tool JSON Schema; generic `call` runs any FM (JSON args, coerced per interface). Dependency-free, extractable subproject |
-| **Next** | RFC callback (server→client) on the client; per-FM MCP tools for a curated allowlist; finish the generating server |
+| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`cmd/rfc-mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools**. Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
+| **Next** | RFC callback (server→client) on the client; per-FM `outputSchema` + HTTP transport for `rfc-mcp`; finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 
