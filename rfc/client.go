@@ -49,6 +49,10 @@ type Destination struct {
 	SOCKS5           *SOCKS5Options
 	Pool             PoolConfig
 	OperationTimeout time.Duration
+	// Callbacks handles server-initiated RFC callbacks (a called FM doing
+	// CALL FUNCTION … DESTINATION 'BACK') by function-module name. Leave nil if
+	// the destination is never expected to call back.
+	Callbacks map[string]CallbackFunc
 }
 
 // Client is a pooled, authenticated connection to one Destination. It is safe
