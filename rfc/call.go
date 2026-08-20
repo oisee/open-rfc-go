@@ -5,6 +5,7 @@ package rfc
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -37,6 +38,20 @@ func (r Result) Table(name string) []map[string]any { return r.tables[name] }
 
 // Has reports whether a scalar/structure export named name was returned.
 func (r Result) Has(name string) bool { _, ok := r.scalars[name]; return ok }
+
+// MarshalJSON renders the result as a flat JSON object of exports by name:
+// scalars and structures (structures as nested objects), plus table exports as
+// arrays. Byte values (RAW/XSTRING) marshal as base64, per encoding/json.
+func (r Result) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(r.scalars)+len(r.tables))
+	for k, v := range r.scalars {
+		out[k] = v
+	}
+	for k, v := range r.tables {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
 
 // structResolver resolves a DDIC structure definition by name.
 type structResolver func(name string) (rfctypes.RfcStructureDefinition, error)
