@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/oisee/open-rfc-go/internal/appc"
@@ -253,7 +254,8 @@ func EncodeCutFunctionRequest(input CutFunctionRequestInput) ([]byte, error) {
 		)
 	}
 	for _, table := range input.Tables {
-		if table.RowByteLength < 0 || table.RowByteLength > 0xffff_ffff {
+		// Compare as uint64: 0xffff_ffff does not fit an int on 32-bit builds.
+		if table.RowByteLength < 0 || uint64(table.RowByteLength) > math.MaxUint32 {
 			return nil, fmt.Errorf("%w: %s rowByteLength must be an unsigned 32-bit integer", ErrRange, table.Name)
 		}
 		name, err := unicodeBytes(table.Name, "table name", 30)

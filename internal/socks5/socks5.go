@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"time"
@@ -129,7 +130,8 @@ type SAPJWT struct {
 func (SAPJWT) method() byte { return methodSAPJWT }
 
 func (a SAPJWT) authenticate(conn io.ReadWriter) error {
-	if len(a.Token) > 0xffff_ffff {
+	// Compare as uint64: 0xffff_ffff does not fit an int on 32-bit builds.
+	if uint64(len(a.Token)) > math.MaxUint32 {
 		return fmt.Errorf("%w: JWT token is too long", ErrProtocol)
 	}
 	var location []byte

@@ -42,6 +42,11 @@ var (
 	ErrProtocol = errors.New("xrfc: malformed xRFC XML")
 )
 
+// maxUint32Limit is 0xffff_ffff, clamped to the largest int the build supports:
+// the constant does not fit an int on 32-bit platforms, where no slice can be
+// that long anyway.
+const maxUint32Limit = min(math.MaxUint32, math.MaxInt)
+
 // Kind selects whether a parameter carries a single structure or a table.
 type Kind string
 
@@ -107,7 +112,7 @@ func NormalizeLimits(limits Limits) (NormalizedLimits, error) {
 	if out.MaxParameterBytes, err = boundedLimit(limits.MaxParameterBytes, cpic.DefaultMaxFieldChainLength, cpic.DefaultMaxFieldChainLength, "maxParameterBytes"); err != nil {
 		return NormalizedLimits{}, err
 	}
-	if out.MaxRows, err = boundedLimit(limits.MaxRows, cpic.DefaultMaxFieldCount, 0xffff_ffff, "maxRows"); err != nil {
+	if out.MaxRows, err = boundedLimit(limits.MaxRows, cpic.DefaultMaxFieldCount, maxUint32Limit, "maxRows"); err != nil {
 		return NormalizedLimits{}, err
 	}
 	return out, nil
