@@ -18,13 +18,28 @@ import (
 // types the encoders expect, guided by the function interface. This lets callers
 // pass JSON-native values (from a CLI or an MCP tool call) directly to Call.
 // Unknown parameters are passed through so encodeCall can report them.
-func coerceParams(iface metadata.RfcFunctionInterface, in Params, resolve structResolver) (Params, error) {
+func coerceParams(iface metadata.RfcFunctionInterface, in Params, resolve structResolver, plan *layoutPlan) (Params, error) {
 	byName := indexParams(iface)
 	out := make(Params, len(in))
 	for name, val := range in {
 		p, ok := byName[name]
 		if !ok {
 			out[name] = val
+			continue
+		}
+		// A recursive parameter has no flat layout to coerce against; walk the
+		// type graph instead so nested objects and arrays reach the recursive
+		// codec with the exact Go types it expects.
+		if rp, ok := plan.lookup(name); ok {
+			if val == nil {
+				out[name] = nil
+				continue
+			}
+			cv, err := coerceGraphParam(plan.graph, rp, val)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %s: %v", ErrProtocol, name, err)
+			}
+			out[name] = cv
 			continue
 		}
 		cv, err := coerceParamValue(p, val, resolve)

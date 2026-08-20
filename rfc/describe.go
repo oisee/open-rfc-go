@@ -27,12 +27,26 @@ type ToolSchema struct {
 // DescribeTool renders an RFC function module's interface as an MCP-tool JSON
 // Schema. Structure and table parameters are expanded from their DDIC layout.
 func (c *Client) DescribeTool(ctx context.Context, functionName string) (ToolSchema, error) {
-	iface, err := c.FunctionInterface(ctx, functionName)
+	lease, err := c.pool.Acquire(ctx)
+	if err != nil {
+		return ToolSchema{}, translate(err)
+	}
+	defer lease.Release()
+	sess := lease.Value()
+	iface, err := c.functionInterfaceOn(ctx, sess, functionName)
 	if err != nil {
 		return ToolSchema{}, err
 	}
+	resolveDef := func(name string) (rfctypes.RfcStructureDefinition, error) {
+		return c.structureDefinitionOn(ctx, sess, name)
+	}
+	// Parameters the flat DDIC model cannot express (a component that is itself
+	// a structure or a table type) are described from the RFC_METADATA_GET type
+	// graph instead — a nested structure as a nested object, a nested table as
+	// an array. See recursive.go.
+	plan := c.planLayoutOn(ctx, sess, iface, resolveDef)
 	resolve := func(name string) map[string]any {
-		def, err := c.StructureDefinition(ctx, name)
+		def, err := resolveDef(name)
 		if err != nil {
 			return map[string]any{"type": "object", "description": name + " (unresolved)"}
 		}
@@ -42,7 +56,12 @@ func (c *Client) DescribeTool(ctx context.Context, functionName string) (ToolSch
 	outProps := map[string]any{}
 	var required []string
 	for _, p := range iface.Parameters {
-		sc := paramSchema(p, resolve)
+		var sc map[string]any
+		if rp, ok := plan.lookup(p.ParameterName); ok {
+			sc = graphParamSchema(plan.graph, rp)
+		} else {
+			sc = paramSchema(p, resolve)
+		}
 		switch p.ParameterClass {
 		case "I":
 			inProps[p.ParameterName] = sc
