@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
+	"github.com/oisee/open-rfc-go/internal/lifecycle"
 	"github.com/oisee/open-rfc-go/internal/metadata"
 	"github.com/oisee/open-rfc-go/internal/rfctypes"
 	"github.com/oisee/open-rfc-go/internal/structure"
@@ -66,8 +68,16 @@ func (c *Client) Call(ctx context.Context, functionName string, in Params) (Resu
 		return Result{}, translate(err)
 	}
 	defer lease.Release()
-	sess := lease.Value()
+	res, err := c.callOn(ctx, lease.Value(), functionName, in)
+	if err != nil && errors.Is(err, ErrTransport) {
+		lease.Discard()
+	}
+	return res, err
+}
 
+// callOn runs one call on a specific session: resolve the interface, coerce and
+// encode the inputs, exchange (servicing any callbacks), then decode.
+func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionName string, in Params) (Result, error) {
 	iface, err := c.functionInterfaceOn(ctx, sess, functionName)
 	if err != nil {
 		return Result{}, err
@@ -89,7 +99,6 @@ func (c *Client) Call(ctx context.Context, functionName string, in Params) (Resu
 	}
 	res, err := sess.CallWithCallbacks(ctx, req, c.callbackHandler(ctx))
 	if err != nil {
-		lease.Discard()
 		return Result{}, fmt.Errorf("%w: %v", ErrTransport, err)
 	}
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
