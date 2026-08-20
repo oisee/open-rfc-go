@@ -80,7 +80,7 @@ func TestEncodeCall(t *testing.T) {
 		param("RFCTABLE", "T", "h", "ZS", 20),
 	}}
 	in := Params{"REQUTEXT": "hi", "IMPORTSTRUCT": map[string]any{"F": "x"}}
-	input, err := encodeCall(iface, in, zsResolver)
+	input, err := encodeCall(iface, in, zsResolver, nil)
 	if err != nil {
 		t.Fatalf("encodeCall: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestEncodeCallUnknownParameter(t *testing.T) {
 	iface := metadata.RfcFunctionInterface{Name: "Z_TEST", Parameters: []classicrfc.FunintParameter{
 		param("REQUTEXT", "I", "C", "", 10),
 	}}
-	_, err := encodeCall(iface, Params{"NOPE": "x"}, zsResolver)
+	_, err := encodeCall(iface, Params{"NOPE": "x"}, zsResolver, nil)
 	if !errors.Is(err, ErrUnknownParameter) {
 		t.Fatalf("err = %v, want ErrUnknownParameter", err)
 	}
@@ -120,7 +120,7 @@ func TestEncodeCallTableImport(t *testing.T) {
 		param("ROWS", "T", "h", "ZS", 20),
 	}}
 	in := Params{"ROWS": []map[string]any{{"F": "a"}, {"F": "bb"}}}
-	input, err := encodeCall(iface, in, zsResolver)
+	input, err := encodeCall(iface, in, zsResolver, nil)
 	if err != nil {
 		t.Fatalf("encodeCall: %v", err)
 	}

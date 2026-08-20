@@ -64,6 +64,9 @@ type Client struct {
 	mu          sync.Mutex
 	fnCache     map[string]metadata.RfcFunctionInterface
 	structCache map[string]rfctypes.RfcStructureDefinition
+	// graphCache holds normalized RFC_METADATA_GET type graphs (and the
+	// failure to obtain one) per function module — see recursive.go.
+	graphCache map[string]graphEntry
 }
 
 // Open dials the destination, establishes a pool of authenticated sessions, and
@@ -122,6 +125,7 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 		dest:        d,
 		fnCache:     map[string]metadata.RfcFunctionInterface{},
 		structCache: map[string]rfctypes.RfcStructureDefinition{},
+		graphCache:  map[string]graphEntry{},
 	}
 	// Fail fast: prove the destination works before returning.
 	lease, err := p.Acquire(ctx)

@@ -85,11 +85,16 @@ func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionNa
 	resolve := func(name string) (rfctypes.RfcStructureDefinition, error) {
 		return c.structureDefinitionOn(ctx, sess, name)
 	}
-	in, err = coerceParams(iface, in, resolve)
+	// Parameters whose DDIC layout is recursive (a component that is itself a
+	// structure or a table type) cannot be modelled by the flat resolver; they
+	// travel on the recursive xRFC codec against an RFC_METADATA_GET type graph.
+	// plan is nil — and nothing changes — for a purely flat interface.
+	plan := c.planLayoutOn(ctx, sess, iface, resolve)
+	in, err = coerceParams(iface, in, resolve, plan)
 	if err != nil {
 		return Result{}, err
 	}
-	input, err := encodeCall(iface, in, resolve)
+	input, err := encodeCall(iface, in, resolve, plan)
 	if err != nil {
 		return Result{}, err
 	}
@@ -104,7 +109,7 @@ func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionNa
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return Result{}, exc
 	}
-	return decodeResult(iface, res.Fields, resolve)
+	return decodeResult(iface, res.Fields, resolve, plan)
 }
 
 func indexParams(iface metadata.RfcFunctionInterface) map[string]classicrfc.FunintParameter {
@@ -115,7 +120,7 @@ func indexParams(iface metadata.RfcFunctionInterface) map[string]classicrfc.Funi
 	return byName
 }
 
-func encodeCall(iface metadata.RfcFunctionInterface, in Params, resolve structResolver) (cpic.CutFunctionRequestInput, error) {
+func encodeCall(iface metadata.RfcFunctionInterface, in Params, resolve structResolver, plan *layoutPlan) (cpic.CutFunctionRequestInput, error) {
 	input := cpic.CutFunctionRequestInput{FunctionName: iface.Name}
 	byName := indexParams(iface)
 	for name := range in {
@@ -130,6 +135,16 @@ func encodeCall(iface metadata.RfcFunctionInterface, in Params, resolve structRe
 		}
 		val, supplied := in[p.ParameterName]
 		if !supplied {
+			continue
+		}
+		// A recursive parameter is serialized from the type graph, whatever its
+		// class: nested structures and nested tables have no fixed-width form.
+		if _, ok := plan.lookup(p.ParameterName); ok {
+			b, err := xrfc.EncodeRecursiveParameter(p, plan.graph, val, xrfc.RecursiveLimits{})
+			if err != nil {
+				return input, fmt.Errorf("%w: %s: %v", ErrProtocol, p.ParameterName, err)
+			}
+			input.XrfcParameters = append(input.XrfcParameters, cpic.NamedValue{Name: p.ParameterName, Value: b})
 			continue
 		}
 		switch p.ParameterClass {
@@ -325,7 +340,7 @@ func scalarFieldDef(p classicrfc.FunintParameter, byteLen int) rfctypes.RfcStruc
 	}
 }
 
-func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, resolve structResolver) (Result, error) {
+func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, resolve structResolver, plan *layoutPlan) (Result, error) {
 	classic, err := classicrfc.DecodeResult(fields)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrProtocol, err)
@@ -344,7 +359,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 			if err != nil {
 				return Result{}, err
 			}
-			m, err := structure.Decode(def, sc.Value)
+			m, err := decodeFixedRow(def, sc.Value)
 			if err != nil {
 				return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, sc.Name, err)
 			}
@@ -367,7 +382,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 				return Result{}, err
 			}
 			for i, row := range t.Rows {
-				m, err := structure.Decode(def, row)
+				m, err := decodeFixedRow(def, row)
 				if err != nil {
 					return Result{}, fmt.Errorf("%w: %s row %d: %v", ErrProtocol, t.Name, i, err)
 				}
@@ -387,6 +402,19 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 		}
 		p, ok := byName[name]
 		if !ok {
+			continue
+		}
+		if rp, ok := plan.lookup(name); ok {
+			v, err := xrfc.DecodeRecursiveParameter(p, plan.graph, x.Value, xrfc.RecursiveLimits{})
+			if err != nil {
+				return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, name, err)
+			}
+			v = normalizeGraphValue(v)
+			if rows, ok := v.([]map[string]any); ok && rp.Kind == xrfc.KindTable {
+				out.tables[name] = rows
+			} else {
+				out.scalars[name] = v
+			}
 			continue
 		}
 		def, err := resolve(p.TableName)
@@ -409,6 +437,36 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 		}
 	}
 	return out, nil
+}
+
+// decodeFixedRow decodes one fixed-width structure value, first restoring any
+// trailing alignment fill the classic serializer omits. DDIC reports a
+// structure's *aligned* byte length while the wire carries only the bytes up to
+// the last field — RFC_METADATA_PARAMS is 464 in RFC_GET_STRUCTURE_DEFINITION
+// and 462 on the wire, the 2-byte tail being pure alignment. The fill is
+// restored only when every declared field is already covered, so a genuinely
+// truncated value still fails the codec's length check.
+func decodeFixedRow(def rfctypes.RfcStructureDefinition, value []byte) (map[string]any, error) {
+	return structure.Decode(def, padTrailingFill(def, value))
+}
+
+func padTrailingFill(def rfctypes.RfcStructureDefinition, value []byte) []byte {
+	declared := int(def.ByteLength)
+	if len(value) >= declared {
+		return value
+	}
+	end := 0
+	for _, f := range def.Fields {
+		if e := int(f.Offset + f.InternalLength); e > end {
+			end = e
+		}
+	}
+	if len(value) < end {
+		return value
+	}
+	padded := make([]byte, declared)
+	copy(padded, value)
+	return padded
 }
 
 // defNeedsXrfc reports whether a structure/table row layout carries a STRING or
