@@ -63,7 +63,7 @@ type structResolver func(name string) (rfctypes.RfcStructureDefinition, error)
 func (c *Client) Call(ctx context.Context, functionName string, in Params) (Result, error) {
 	lease, err := c.pool.Acquire(ctx)
 	if err != nil {
-		return Result{}, err
+		return Result{}, translate(err)
 	}
 	defer lease.Release()
 	sess := lease.Value()

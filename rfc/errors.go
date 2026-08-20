@@ -3,11 +3,15 @@
 package rfc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/oisee/open-rfc-go/internal/lifecycle"
+	"github.com/oisee/open-rfc-go/internal/pool"
 	"github.com/oisee/open-rfc-go/internal/rfcerr"
+	"github.com/oisee/open-rfc-go/internal/transport"
 )
 
 // The error taxonomy for the public package. Wrap-and-match with errors.Is;
@@ -25,7 +29,31 @@ var (
 	ErrTransport = errors.New("rfc: transport error")
 	// ErrUnknownParameter reports a parameter absent from the function interface.
 	ErrUnknownParameter = errors.New("rfc: unknown parameter")
+	// ErrPoolExhausted reports that no pooled connection became available before
+	// the acquire deadline.
+	ErrPoolExhausted = errors.New("rfc: connection pool exhausted")
+	// ErrTimeout reports that the context deadline elapsed.
+	ErrTimeout = errors.New("rfc: timeout")
 )
+
+// translate maps an internal package's sentinel onto the public taxonomy so
+// callers can match with errors.Is against this package's errors alone. The
+// original error stays wrapped for diagnostics.
+func translate(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, pool.ErrPoolExhausted):
+		return fmt.Errorf("%w: %v", ErrPoolExhausted, err)
+	case errors.Is(err, pool.ErrClosed), errors.Is(err, lifecycle.ErrClosed), errors.Is(err, transport.ErrClosed):
+		return fmt.Errorf("%w: %v", ErrClosed, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("%w: %v", ErrTimeout, err)
+	case errors.Is(err, context.Canceled):
+		return err
+	}
+	return err
+}
 
 // ExceptionKind classifies an ABAP-side failure.
 type ExceptionKind string

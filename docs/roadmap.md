@@ -68,14 +68,14 @@ trustworthy than the TypeScript original**. The gap between "correct codecs" and
 |---|---|---|
 | ✅ **P0 done** | Public `rfc` package (typed `Client`/`Destination`/`Call`) | Landed and live-proven: `rfc.Open`/`Client.Call`, native values, metadata cache. Unblocked the tool surface, xRFC wiring, and scalar coverage. |
 | ✅ **P0 done** | Surface the ABAP error envelope through the call boundary | `Client.Call` now returns a typed `*ABAPException` (key/message/type/number/class), `errors.As`-able; live-verified. |
-| **P0** | Error taxonomy for the public package (`errors.Is/As` tree) | Each internal package has its own sentinels; consumers need one documented set: `ErrLogonRejected`, `*ABAPException`, `ErrProtocol`, `ErrTransport`, `ErrTimeout`, `ErrPoolExhausted`, `ErrClosed`. |
+| ✅ **P0 done** | Error taxonomy for the public package (`errors.Is/As` tree) | One documented set in `rfc`: `ErrClosed`, `ErrNotAuthenticated`, `ErrLogonRejected`, `ErrProtocol`, `ErrTransport`, `ErrUnknownParameter`, `ErrPoolExhausted`, `ErrTimeout`, plus `*ABAPException` via `errors.As`. Internal sentinels (pool/lifecycle/transport, context deadline) are translated onto it at the call boundary, with the original wrapped for diagnostics. |
 | ✅ **P1 done (cache)** | Metadata repository runtime (cache + in-flight coalescing) | Function-interface and structure-definition caches landed; in-flight coalescing still open. |
 | ✅ **P1 done** | Deep/nested xRFC live verification (`STFC_DEEP_TABLE/STRUCTURE`) | Verified live on .105 (2026-08-20): deep structures & tables round-trip incl. STRING/XSTRING; xRFC codec wired into `rfc.Call`. |
 | **P1** | Codegen: DDIC metadata → typed Go structs (`rfcgen`) | The normalized graph + `RfcStructureDefinition` already exist; the single highest-leverage ergonomic differentiator over node-rfc/upstream. |
 | **P1** | Observability hooks (`log/slog` + OpenTelemetry) | None today. Greenfield; the "no I/O under a lock" rule makes a clean hook contract easy. |
 | **P1** | Typed `ReadTable` wrapper + message/`BAPIRET2` resolver | The two most-used diagnostic/data primitives; enabler for the debug-trace assistant. Now also folded into `cmd/rfc read-table`. |
 | **P1** | Fuzz the runtime metadata row decoders | `DecodeDdIfDfiesRow`, `DecodeRfcFieldsRow`, `DecodeRfcFunctionInterfaceResult`, `classicrfc.DecodeResult` consume live server bytes but have no fuzz target — violates the port's own "fuzz every decoder" rule. |
-| **P1** | Wire SAProuter + SOCKS5 into the dial path | Both codecs are done and tested in isolation; `transport.Dial` still does a plain `net.Dial`, so routed/proxied dialing is unreachable from the client. |
+| ✅ **P1 done** | Wire SAProuter + SOCKS5 into the dial path | Wired: `rfc.Destination.Router` / `.SOCKS5` flow through `transport.DialWith`, so routed and proxied dialing is reachable from the public client. |
 | **P2** | tRFC/qRFC/bgRFC transactional units | Valuable for integration; substantial new wire work (TID lifecycle, confirm/commit). |
 | **P2** | Registered/inbound RFC server | Large, high-value, new protocol direction; see `docs/polyglot-rfc-server.md`. Do after the client API stabilizes. |
 | **P2** | Zero-copy / pooled decode path | Up to four copies socket→field today; a measured optimization once benchmarked. |
