@@ -39,9 +39,10 @@ var (
 	mcpSystem   string
 )
 
-func main() {
+func runMCP(cliArgs []string) error {
+	mcpSystem = systemName // inherit the global -s/--system
 	var exposeSet, hideSet, readOnlySet, maxSet bool
-	args := os.Args[1:]
+	args := cliArgs
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--read-only":
@@ -108,6 +109,7 @@ func main() {
 		out.WriteByte('\n')
 		out.Flush()
 	}
+	return nil
 }
 
 type rpcReq struct {

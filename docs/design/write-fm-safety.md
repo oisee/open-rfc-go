@@ -12,7 +12,7 @@ metadata already available through the `rfc` package. It changes **no wire
 behaviour**; it is a policy layer above the call boundary.
 
 > **Scope of this doc.** A classification model, its signals, a declarative
-> policy format with a schema, the `cmd/rfc-mcp` integration, a build/maintenance
+> policy format with a schema, the `rfc mcp` integration, a build/maintenance
 > workflow, and the honest limits. It does not propose Go changes here — it
 > specifies what those changes must implement.
 
@@ -28,7 +28,7 @@ delete business data, unlock or lock users, post documents, and — with a
 following `BAPI_TRANSACTION_COMMIT` — make those changes durable. An assistant
 that can call arbitrary FMs can do arbitrary damage.
 
-Today's control is coarse. `cmd/rfc-mcp --read-only` drops the generic
+Today's control is coarse. `rfc mcp --read-only` drops the generic
 `rfc_call` tool, but **auto-exposed per-FM tools bypass it** — the operator
 curated them, so the flag trusts them. That is too blunt in both directions: it
 forbids reads through the generic path while permitting writes through the
@@ -244,7 +244,7 @@ Masks are the **lowest-priority** tier, applied only when no `deny`, `rules`, or
 `safe` entry names the FM. They let an operator say "everything in my read-only
 `Z_RO_*` namespace is safe" or "all `*_GETLIST` are safe" without enumerating
 each FM, while still letting a specific `deny` entry carve out an exception.
-Masks compose with `cmd/rfc-mcp`'s existing `--expose` / `--hide` masks but are
+Masks compose with `rfc mcp`'s existing `--expose` / `--hide` masks but are
 **orthogonal**: `--expose`/`--hide` decide *which FMs become tools*; the policy
 masks decide *whether a tool is callable and how*. An FM must survive both — be
 exposed **and** be permitted — to be invoked. Deny always wins over any mask.
@@ -327,7 +327,7 @@ does **not** make the FM callable — it fails closed until a human signs off. T
 is the safety-critical default: **unreviewed == not callable.**
 
 
-## 4. Integration with `cmd/rfc-mcp`
+## 4. Integration with `rfc mcp`
 
 The policy is a gate the server consults after resolving that an FM is exposed
 and before it calls. Flags and modes:
