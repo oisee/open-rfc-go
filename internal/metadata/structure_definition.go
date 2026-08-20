@@ -151,10 +151,14 @@ func DecodeRfcStructureDefinitionResult(structureName string, fields []cpic.Fiel
 		if err != nil {
 			return zero, err
 		}
-		expectedPosition := int32(index + 1)
-		if field.Position != expectedPosition {
-			return zero, fmt.Errorf("%w: RFC_FIELDS %s has position %d; expected %d", ErrStructureDefinition, field.FieldName, field.Position, expectedPosition)
-		}
+		// POSITION is informational and is not always a dense 1..n sequence: a
+		// structure that includes another one (.INCLUDE / append) reports the
+		// included component's own position, so the rows can repeat or skip
+		// values. The invariants that matter — unique names, ascending
+		// non-overlapping offsets, everything inside the declared length — are
+		// checked below; renumber the fields by their order so the rest of the
+		// stack sees a dense sequence.
+		field.Position = int32(index + 1)
 		if field.TableName != structureName {
 			return zero, fmt.Errorf("%w: RFC_FIELDS %s belongs to %s; expected %s", ErrStructureDefinition, field.FieldName, field.TableName, structureName)
 		}
