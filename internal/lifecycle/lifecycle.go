@@ -34,6 +34,7 @@ const PingFunction = "RFC_PING"
 type Session interface {
 	Call(ctx context.Context, functionName string, imports []cpic.NamedValue, requestedOutputs []string) (client.CallResult, error)
 	CallRaw(ctx context.Context, request []byte) (client.CallResult, error)
+	CallWithCallbacks(ctx context.Context, request []byte, onCallback client.CallbackHandler) (client.CallResult, error)
 	Authenticated() bool
 	Close() error
 }
@@ -72,6 +73,18 @@ func (m *Managed) CallRaw(ctx context.Context, request []byte) (client.CallResul
 		return client.CallResult{}, ErrClosed
 	}
 	return m.sess.CallRaw(ctx, request)
+}
+
+// CallWithCallbacks sends a pre-built request and services server-initiated RFC
+// callbacks via onCallback until the response arrives, serialized against every
+// other operation on this session.
+func (m *Managed) CallWithCallbacks(ctx context.Context, request []byte, onCallback client.CallbackHandler) (client.CallResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return client.CallResult{}, ErrClosed
+	}
+	return m.sess.CallWithCallbacks(ctx, request, onCallback)
 }
 
 // Ping probes the session with RFC_PING. A nil return means the session is

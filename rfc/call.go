@@ -87,7 +87,7 @@ func (c *Client) Call(ctx context.Context, functionName string, in Params) (Resu
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrProtocol, err)
 	}
-	res, err := sess.CallRaw(ctx, req)
+	res, err := sess.CallWithCallbacks(ctx, req, c.callbackHandler(ctx))
 	if err != nil {
 		lease.Discard()
 		return Result{}, fmt.Errorf("%w: %v", ErrTransport, err)

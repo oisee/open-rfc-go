@@ -376,32 +376,59 @@ func (s *Session) LogonAndPing(ctx context.Context, opts LogonOptions) error {
 }
 
 // exchange sends one CPIC request wrapped in APPC and reassembles the reply.
+// exchange sends one CPIC request and returns the single reassembled reply. It is
+// used for setup/logon and for calls without callbacks.
 func (s *Session) exchange(ctx context.Context, request []byte) ([]byte, error) {
-	if s.closed {
-		return nil, fmt.Errorf("%w: session is closed", ErrSession)
-	}
-	framing, err := cpic.InspectRequestAppcFraming(request)
+	async, err := s.sendRequest(ctx, request)
 	if err != nil {
 		return nil, err
+	}
+	return s.receiveMessage(ctx, async)
+}
+
+// sendRequest splits a pre-framed CPIC request into application data and final
+// SAP parameters and writes it. It reports whether the first outgoing fragment
+// was F_ASEND_DATA (which the reply decoder must be told to allow as its initial
+// receive).
+func (s *Session) sendRequest(ctx context.Context, request []byte) (bool, error) {
+	framing, err := cpic.InspectRequestAppcFraming(request)
+	if err != nil {
+		return false, err
 	}
 	var finalSap []byte
 	if framing.FinalSapParameterLength != 0 {
 		finalSap = request[framing.ApplicationDataLength:]
 	}
+	return s.sendData(ctx, request[:framing.ApplicationDataLength], finalSap)
+}
+
+// sendData frames raw CPIC application data (+ optional final SAP parameters) as
+// an outgoing APPC data message and writes it. Used for requests and for the
+// response our client sends back to a server-initiated callback.
+func (s *Session) sendData(ctx context.Context, appData, finalSap []byte) (bool, error) {
+	if s.closed {
+		return false, fmt.Errorf("%w: session is closed", ErrSession)
+	}
 	plan, err := appc.PlanOutgoingDataFragments(appc.OutgoingDataPlanInput{
 		RecordHeaderInput:  appc.RecordHeaderInput{ConversationID: s.conversationID},
-		ApplicationData:    request[:framing.ApplicationDataLength],
+		ApplicationData:    appData,
 		FinalSapParameters: finalSap,
 		CommunicationIndex: 0xffff,
 		ConnectionIndex:    s.connectionIndex,
 	}, appc.OutgoingDataPlannerOptions{CpicStreaming: appc.StreamingDisabled})
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	if err := s.writeDataPlan(ctx, plan); err != nil {
-		return nil, err
+		return false, err
 	}
+	return len(plan) > 0 && plan[0].FunctionCode == appc.FuncAsyncSendData, nil
+}
 
+// receiveMessage receives APPC records and returns the next reassembled RFC
+// message, advancing the setup state machine. allowInitialReceive must be true
+// when the immediately preceding send began with F_ASEND_DATA.
+func (s *Session) receiveMessage(ctx context.Context, allowInitialReceive bool) ([]byte, error) {
 	var decoder *appc.ConversationDecoder
 	for {
 		payload, err := s.transport.Receive(ctx)
@@ -413,9 +440,8 @@ func (s *Session) exchange(ctx context.Context, request []byte) ([]byte, error) 
 			return nil, err
 		}
 		if decoder == nil {
-			allowInitial := len(plan) > 0 && plan[0].FunctionCode == appc.FuncAsyncSendData
 			decoder, err = appc.NewConversationDecoder(appc.ConversationDecoderOptions{
-				AllowInitialReceive: allowInitial, ValidateIncomingDataOperationInfo: true,
+				AllowInitialReceive: allowInitialReceive, ValidateIncomingDataOperationInfo: true,
 			})
 			if err != nil {
 				return nil, err
@@ -523,15 +549,57 @@ func (s *Session) CallRaw(ctx context.Context, request []byte) (CallResult, erro
 	if !s.authenticated {
 		return CallResult{}, fmt.Errorf("%w: session must be authenticated before a call", ErrSession)
 	}
-	response, err := s.exchange(ctx, request)
+	return s.CallWithCallbacks(ctx, request, nil)
+}
+
+// CallbackHandler answers a server-initiated callback: given the raw CPIC request
+// the server sent back over the same conversation, it returns the raw CPIC
+// response to send. nil means callbacks are unsupported (an incoming callback is
+// then an error).
+type CallbackHandler func(request []byte) (response []byte, err error)
+
+// CallWithCallbacks issues a function call and, while awaiting its response,
+// services any server-initiated callbacks (RFC "DESTINATION 'BACK'") over the
+// same re-entrant conversation: each callback request is handed to onCallback and
+// its response is sent back, until the function's own response arrives.
+func (s *Session) CallWithCallbacks(ctx context.Context, request []byte, onCallback CallbackHandler) (CallResult, error) {
+	if !s.authenticated {
+		return CallResult{}, fmt.Errorf("%w: session must be authenticated before a call", ErrSession)
+	}
+	async, err := s.sendRequest(ctx, request)
 	if err != nil {
 		return CallResult{}, err
 	}
-	decoded, err := cpic.DecodeFunctionResultFields(response)
-	if err != nil {
-		return CallResult{}, err
+	for {
+		data, err := s.receiveMessage(ctx, async)
+		if err != nil {
+			return CallResult{}, err
+		}
+		if isCallbackRequest(data) {
+			if onCallback == nil {
+				return CallResult{}, fmt.Errorf("%w: server sent an RFC callback but no handler is registered", ErrSession)
+			}
+			resp, cbErr := onCallback(data)
+			if cbErr != nil {
+				return CallResult{}, cbErr
+			}
+			// resp is a fully framed CPIC message (compact final-SAP trailer or
+			// streamed sentinel); split and send it like any request.
+			if async, err = s.sendRequest(ctx, resp); err != nil {
+				return CallResult{}, err
+			}
+			continue
+		}
+		decoded, err := cpic.DecodeFunctionResultFields(data)
+		if err != nil {
+			return CallResult{}, err
+		}
+		return CallResult{Success: decoded.Success, Fields: decoded.Fields, Envelope: decoded.Envelope}, nil
 	}
-	return CallResult{Success: decoded.Success, Fields: decoded.Fields, Envelope: decoded.Envelope}, nil
+}
+
+func isCallbackRequest(data []byte) bool {
+	return len(data) >= 4 && data[0] == 0x05 && data[1] == 0x02 && data[2] == 0x00 && data[3] == 0x00
 }
 
 // CallSTFCConnection invokes STFC_CONNECTION with REQUTEXT and returns ECHOTEXT.
