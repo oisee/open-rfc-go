@@ -186,3 +186,64 @@ func EncodeCutFunctionExceptionResponse(exceptionKey string) ([]byte, error) {
 	out = append(out, 0xff, 0xff)
 	return out, nil
 }
+
+// EncodeCutFunctionResponseClassic mirrors the lean classic response a live A4H
+// server actually sends for a normal function call (verified against .105:
+// 0x0503, 0x0514 swapped GUID, 0x0420, 0x0512, per-export 0x0205+0x0201+0x0203,
+// 0x0130 program, 0x0667 metric, End) — crucially WITHOUT the 0x0104 S4 block,
+// whose stale baked GUIDs a live client rejects.
+func EncodeCutFunctionResponseClassic(exports []cpic.NamedValue, tables []Table, guid []byte) ([]byte, error) {
+	fields := []cpic.Field{{Tag: uint16(cpic.TagResponseContext), Value: nil}}
+	if len(guid) == 16 {
+		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagSession), Value: swapRFCGUID(guid)})
+	}
+	fields = append(fields, cpic.Field{Tag: 0x0420, Value: []byte{0, 0, 0, 0}})
+	fields = append(fields, cpic.Field{Tag: uint16(cpic.TagCallContext), Value: nil})
+	for _, e := range exports {
+		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagRequestedOutput), Value: encodeUTF16LE(e.Name)})
+	}
+	for _, e := range exports {
+		name, err := encodeName(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields,
+			cpic.Field{Tag: uint16(cpic.TagParameterName), Value: name},
+			cpic.Field{Tag: uint16(cpic.TagParameterValue), Value: append([]byte(nil), e.Value...)},
+		)
+	}
+	for _, t := range tables {
+		name, err := encodeName(t.Name)
+		if err != nil {
+			return nil, err
+		}
+		header := make([]byte, 8)
+		binary.BigEndian.PutUint32(header[0:], uint32(t.RowByteLength))
+		binary.BigEndian.PutUint32(header[4:], uint32(len(t.Rows)))
+		fields = append(fields,
+			cpic.Field{Tag: uint16(cpic.TagTableName), Value: name},
+			cpic.Field{Tag: uint16(cpic.TagTableHeader), Value: header},
+		)
+		for _, row := range t.Rows {
+			fields = append(fields, cpic.Field{Tag: uint16(cpic.TagTableCompr), Value: append([]byte(nil), row...)})
+		}
+	}
+	program, err := classicrfc.EncodeAbapChar("SAPLZTST", 40)
+	if err != nil {
+		return nil, err
+	}
+	fields = append(fields,
+		cpic.Field{Tag: uint16(cpic.TagProgram), Value: program},
+		cpic.Field{Tag: 0x0667, Value: append([]byte(nil), s4Metric0667...)},
+		cpic.Field{Tag: uint16(cpic.TagEnd), Value: nil},
+	)
+	chain, err := cpic.EncodeFieldChain(uint16(cpic.TagResponseStart), fields, cpic.FieldChainLimits{})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRequest, err)
+	}
+	out := make([]byte, 0, len(cutResponsePrefix)+len(chain)+2)
+	out = append(out, cutResponsePrefix...)
+	out = append(out, chain...)
+	out = append(out, 0xff, 0xff)
+	return out, nil
+}

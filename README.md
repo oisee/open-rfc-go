@@ -48,12 +48,30 @@ pick the mode:
 
 ```sh
 go run ./cmd/rfc-lab -target-host <your-real-sap-host>
-#   sys 00  ports 3200/3300  transparent sniffer → the real system (captures the wire)
-#   sys 11  port  3311       our state-machine server: Connection/Unicode tests go green
-#   sys 12  port  3312       content-addressed server: a whole ABAP program runs green
-#   type H  port  8000       our HTTP responder
-#   type W  port  44300      our WebSocket upgrade
+#   sys 00  ports 3200/3300  transparent sniffer → the real system (captures the wire)   [solid]
+#   sys 10  port  3310       type-T replay of a capture (pass -replay <cap.jsonl>)        [needs a capture]
+#   sys 11  port  3311       state-machine server: Connection/Unicode tests go green      [solid]
+#   sys 12  port  3312       content-addressed server: a whole ABAP program runs green    [solid]
+#   sys 13  port  3313       conscious server: GENERATES classic responses from handlers  [WIP]
+#   type H  port  8000       HTTP responder (200 OK to any path)                          [untested vs real ADT]
+#   type W  port  44300      WebSocket upgrade (101 Switching Protocols)                  [untested / stub]
 ```
+
+> **Endpoint maturity — read before you point a real destination here.**
+> - **Solid (live-proven against A4H):** the sniffer (sys 00), the replay/state-machine
+>   servers (sys 11), and the content-addressed server (sys 12) — SM59 Connection/Unicode/
+>   Fast-Serialization tests and a full six-call ABAP program all go green.
+> - **WIP — conscious server (sys 13):** *generates* responses from handler values instead
+>   of replaying captures. The serializer handshake is solved — it forces the ABAP client
+>   down to the **classic** serializer (proven live: with a classic-only logon-accept the
+>   client stops sending fast-ser `0x5001` and sends classic `0x0201` params). What's not
+>   finished is the **classic response encoding for exports**: a live driver call
+>   (`Z_DOUBLE`/`Z_GREET` via an SM59 destination) currently reaches the server and is
+>   decoded, but the generated reply is not yet accepted end to end (export values don't
+>   round-trip). Don't rely on sys 13 yet.
+> - **Untested — `type H` (8000) and `type W` (44300):** they answer the raw HTTP/WebSocket
+>   handshake, but were **not** exercised against a real SM59 type-H/G/W destination or an
+>   ADT client. Treat them as stubs.
 
 **Inspect the wire** — a framing-aware proxy and a decoder that speaks our own
 protocol stack:
@@ -67,10 +85,12 @@ go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted
 
 | | state |
 |---|---|
-| **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors |
-| **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies) |
+| **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors; decodes both classic and fast-ser (`0x5001`) responses |
+| **Server (replay)** | solid — answers all SM59 test buttons + a full ABAP program via captured, token-patched replies (sys 11/12) |
+| **Server (generate, sys 13)** | WIP — generates classic responses from handler values; **forces the client to the classic serializer** (proven live). Export encoding for generated replies is still being fixed |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Next** | a server that *generates* responses from values (dispatch), then Go/JS functions behind a polyglot bridge |
+| **Autonomous driver** | our Go client calls a driver FM on the live system (`Z_CALL_RFC`) that calls back into our server via SM59 destinations — no SAP GUI needed to exercise the loop |
+| **Next** | finish the classic export encoding for the conscious server, then Go/JS functions behind a polyglot bridge |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md).
 
