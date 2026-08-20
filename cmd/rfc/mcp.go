@@ -230,7 +230,7 @@ func resolveExposed(ctx context.Context) []map[string]any {
 		var candidates []string
 		for _, m := range exposeMasks {
 			like := strings.ReplaceAll(strings.ToUpper(m), "*", "%")
-			rows, err := rfctool.ReadTable(ctx, c, "TFDIR", "FMODE = 'R' AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
+			rows, err := rfctool.ReadTable(ctx, c, "TFDIR", "FMODE IN ( 'R', 'X' ) AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "rfc-mcp: expose:", err)
 				continue
@@ -444,7 +444,7 @@ func search(ctx context.Context, c *rfc.Client, a map[string]any) (any, error) {
 	}
 	where := "FUNCNAME LIKE '" + like + "'"
 	if all, _ := a["all"].(bool); !all {
-		where += " AND FMODE = 'R'"
+		where += " AND FMODE IN ( 'R', 'X' )"
 	}
 	if g := strVal(a["group"]); g != "" {
 		where += " AND PNAME LIKE 'SAPL" + strings.ToUpper(strings.ReplaceAll(g, "*", "%")) + "%'"

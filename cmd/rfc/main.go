@@ -242,9 +242,14 @@ func runSearch(ctx context.Context, args []string) error {
 		like = "%" + like + "%"
 	}
 	where := "FUNCNAME LIKE '" + like + "'"
-	// Default to RFC-enabled modules only (TFDIR-FMODE = 'R'); --all lifts it.
+	// Default to remote-enabled modules only; --all lifts it. TFDIR-FMODE has
+	// two remote values, not one: 'R' is a remote-enabled module and 'X' a
+	// remote-enabled module whose interface is basXML-capable (SAP flags every
+	// FM carrying deep/nested parameters that way — SADT_REST_RFC_ENDPOINT
+	// among them). Filtering on 'R' alone hides them and makes a perfectly
+	// callable FM look local.
 	if !hasFlag(args, "--all") {
-		where += " AND FMODE = 'R'"
+		where += " AND FMODE IN ( 'R', 'X' )"
 	}
 	if g, ok := flagValue(args, "--group"); ok {
 		where += " AND PNAME LIKE 'SAPL" + strings.ToUpper(strings.ReplaceAll(g, "*", "%")) + "%'"

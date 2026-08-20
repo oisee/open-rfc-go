@@ -700,8 +700,36 @@ func decodeEntities(raw, path string) (string, error) {
 	return result, nil
 }
 
+// unwrapBase64 joins a MIME line-wrapped base64 cell into one line.
+//
+// The ABAP xRFC serializer emits an XSTRING cell as base64 broken every 76
+// columns with a bare LF — verified on a live 7.58 system, where
+// SADT_REST_RFC_ENDPOINT returned a 299 KB RESPONSE.MESSAGE_BODY as 5249
+// lines of exactly 76 characters. A canonicality check on the raw cell text
+// therefore rejects every XSTRING longer than 57 bytes, which is why the
+// wrapping has to be undone before the value is validated, not after.
+//
+// Only CR and LF are removed, and only as separators: the alphabet, length,
+// padding and round-trip checks below then run on the joined text, so a value
+// with embedded spaces, a non-standard alphabet or non-zero padding bits is
+// still rejected exactly as before.
+func unwrapBase64(v string) string {
+	if !strings.ContainsAny(v, "\r\n") {
+		return v
+	}
+	var b strings.Builder
+	b.Grow(len(v))
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c != '\r' && c != '\n' {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // DecodeBase64 decodes one canonical, unpadded-or-padded base64 cell value.
 func DecodeBase64(v, path string, maximum int) ([]byte, error) {
+	v = unwrapBase64(v)
 	if len(v) == 0 {
 		return []byte{}, nil
 	}

@@ -9,9 +9,11 @@ package xrfc
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/oisee/open-rfc-go/internal/rfctypes"
@@ -346,3 +348,34 @@ func ptr(n int) *int { return &n }
 func negZero() float64 { return math.Copysign(0, -1) }
 
 func isNegZero(f float64) bool { return f == 0 && math.Signbit(f) }
+
+// TestDecodeBase64LineWrapped covers the same server behaviour on the flat
+// classic xRFC codec: an XSTRING cell arrives MIME-wrapped at 76 columns.
+func TestDecodeBase64LineWrapped(t *testing.T) {
+	var b strings.Builder
+	payload := bytes.Repeat([]byte{0xde, 0xad, 0xbe, 0xef}, 64) // 256 bytes
+	encoded := base64.StdEncoding.EncodeToString(payload)
+	for i := 0; i < len(encoded); i += 76 {
+		end := i + 76
+		if end > len(encoded) {
+			end = len(encoded)
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(encoded[i:end])
+	}
+	got, err := DecodeBase64(b.String(), "X", 1<<20)
+	if err != nil {
+		t.Fatalf("wrapped: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("wrapped decode mismatch")
+	}
+	if _, err := DecodeBase64(strings.ReplaceAll(b.String(), "\n", "\r\n"), "X", 1<<20); err != nil {
+		t.Fatalf("crlf wrapped: %v", err)
+	}
+	if _, err := DecodeBase64(strings.ReplaceAll(b.String(), "\n", " "), "X", 1<<20); err == nil {
+		t.Fatalf("space-separated base64 must stay rejected")
+	}
+}
