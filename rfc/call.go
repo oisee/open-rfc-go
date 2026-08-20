@@ -249,6 +249,22 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		out := make([]byte, n)
 		copy(out, b)
 		return out, nil
+	case "g":
+		// STRING: variable-length UTF-8 with a trailing NUL terminator, the
+		// field chain delimits its length (no fixed width, no UTF-16 — unlike a
+		// CHAR field).
+		s, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s expects a string", ErrProtocol, p.ParameterName)
+		}
+		return append([]byte(s), 0), nil
+	case "y":
+		// XSTRING: variable-length raw bytes.
+		b, ok := val.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s expects bytes", ErrProtocol, p.ParameterName)
+		}
+		return append([]byte(nil), b...), nil
 	default:
 		return nil, fmt.Errorf("%w: %s scalar type %s is not yet supported by the typed API", ErrProtocol, p.ParameterName, p.Exid)
 	}
@@ -363,6 +379,12 @@ func decodeScalar(p classicrfc.FunintParameter, b []byte) (any, error) {
 		}
 		return int32(binary.LittleEndian.Uint32(b)), nil
 	case "X":
+		return append([]byte(nil), b...), nil
+	case "g":
+		// STRING: variable-length UTF-8 with a trailing NUL terminator.
+		return strings.TrimSuffix(string(b), "\x00"), nil
+	case "y":
+		// XSTRING: variable-length raw bytes.
 		return append([]byte(nil), b...), nil
 	default:
 		// Unknown scalar type: hand back the raw bytes rather than fail.
