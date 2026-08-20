@@ -13,6 +13,7 @@ import (
 	"github.com/oisee/open-rfc-go/internal/metadata"
 	"github.com/oisee/open-rfc-go/internal/rfctypes"
 	"github.com/oisee/open-rfc-go/internal/structure"
+	"github.com/oisee/open-rfc-go/internal/xrfc"
 )
 
 // Params is the input to a call: parameter name → native Go value. A scalar is
@@ -113,6 +114,16 @@ func encodeCall(iface metadata.RfcFunctionInterface, in Params, resolve structRe
 			if !ok {
 				return input, fmt.Errorf("%w: %s expects []map[string]any", ErrProtocol, p.ParameterName)
 			}
+			// A row layout that carries STRING/XSTRING can't be fixed-width
+			// serialized — it travels as an xRFC XML parameter instead.
+			if defNeedsXrfc(def) {
+				b, err := xrfc.EncodeParameter(p.ParameterName, def, xrfc.KindTable, rows, xrfc.Limits{})
+				if err != nil {
+					return input, fmt.Errorf("%w: %s: %v", ErrProtocol, p.ParameterName, err)
+				}
+				input.XrfcParameters = append(input.XrfcParameters, cpic.NamedValue{Name: p.ParameterName, Value: b})
+				continue
+			}
 			table := cpic.Table{Name: p.ParameterName, RowByteLength: int(def.ByteLength)}
 			for i, row := range rows {
 				b, err := structure.Encode(def, row)
@@ -123,6 +134,57 @@ func encodeCall(iface metadata.RfcFunctionInterface, in Params, resolve structRe
 			}
 			input.Tables = append(input.Tables, table)
 		case "I", "C":
+			// A table-typed import/changing parameter (EXID 'h') carries rows
+			// like a TABLES parameter. If the row layout has STRING/XSTRING it
+			// travels as an xRFC XML parameter; otherwise as a classic table.
+			if isTableExid(p.Exid) {
+				def, err := resolve(p.TableName)
+				if err != nil {
+					return input, err
+				}
+				rows, ok := val.([]map[string]any)
+				if !ok {
+					return input, fmt.Errorf("%w: %s expects []map[string]any", ErrProtocol, p.ParameterName)
+				}
+				if defNeedsXrfc(def) {
+					b, err := xrfc.EncodeParameter(p.ParameterName, def, xrfc.KindTable, rows, xrfc.Limits{})
+					if err != nil {
+						return input, fmt.Errorf("%w: %s: %v", ErrProtocol, p.ParameterName, err)
+					}
+					input.XrfcParameters = append(input.XrfcParameters, cpic.NamedValue{Name: p.ParameterName, Value: b})
+					continue
+				}
+				table := cpic.Table{Name: p.ParameterName, RowByteLength: int(def.ByteLength)}
+				for i, row := range rows {
+					b, err := structure.Encode(def, row)
+					if err != nil {
+						return input, fmt.Errorf("%w: %s row %d: %v", ErrProtocol, p.ParameterName, i, err)
+					}
+					table.Rows = append(table.Rows, b)
+				}
+				input.Tables = append(input.Tables, table)
+				continue
+			}
+			// A structure whose layout carries STRING/XSTRING travels as an
+			// xRFC XML parameter, not a fixed-width import.
+			if isStructureExid(p.Exid) {
+				def, err := resolve(p.TableName)
+				if err != nil {
+					return input, err
+				}
+				if defNeedsXrfc(def) {
+					m, ok := val.(map[string]any)
+					if !ok {
+						return input, fmt.Errorf("%w: %s expects map[string]any", ErrProtocol, p.ParameterName)
+					}
+					b, err := xrfc.EncodeParameter(p.ParameterName, def, xrfc.KindStructure, m, xrfc.Limits{})
+					if err != nil {
+						return input, fmt.Errorf("%w: %s: %v", ErrProtocol, p.ParameterName, err)
+					}
+					input.XrfcParameters = append(input.XrfcParameters, cpic.NamedValue{Name: p.ParameterName, Value: b})
+					continue
+				}
+			}
 			b, err := encodeImport(p, val, resolve)
 			if err != nil {
 				return input, err
@@ -243,7 +305,51 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 		}
 		out.tables[t.Name] = rows
 	}
+
+	// Surface xRFC XML parameters (STRING/XSTRING-bearing structures and tables).
+	// The parameter name lives inside the XML, so recover it, then decode against
+	// the interface's layout for that parameter.
+	for _, x := range classic.XrfcParameters {
+		name, err := xrfc.DecodeParameterName(x.Value, xrfc.Limits{})
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: xRFC parameter name: %v", ErrProtocol, err)
+		}
+		p, ok := byName[name]
+		if !ok {
+			continue
+		}
+		def, err := resolve(p.TableName)
+		if err != nil {
+			return Result{}, err
+		}
+		kind := xrfc.KindStructure
+		if p.ParameterClass == "T" || isTableExid(p.Exid) {
+			kind = xrfc.KindTable
+		}
+		v, err := xrfc.DecodeParameter(name, def, kind, x.Value, xrfc.Limits{})
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, name, err)
+		}
+		if kind == xrfc.KindTable {
+			rows, _ := v.([]map[string]any)
+			out.tables[name] = rows
+		} else {
+			out.scalars[name] = v
+		}
+	}
 	return out, nil
+}
+
+// defNeedsXrfc reports whether a structure/table row layout carries a STRING or
+// XSTRING field (EXID g/y). Such a layout cannot be fixed-width serialized by the
+// classic codec and must travel as an xRFC XML parameter instead.
+func defNeedsXrfc(def rfctypes.RfcStructureDefinition) bool {
+	for _, f := range def.Fields {
+		if f.Exid == "g" || f.Exid == "y" {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeScalar(p classicrfc.FunintParameter, b []byte) (any, error) {
@@ -281,3 +387,7 @@ func asInt32(v any) (int32, bool) {
 // (u/v) rather than a scalar. A scalar CHAR may carry a TableName (its data
 // element), so classification is by EXID, not by TableName.
 func isStructureExid(exid string) bool { return exid == "u" || exid == "v" }
+
+// isTableExid reports whether a parameter's EXID denotes a table type (a table
+// passed as an import/changing parameter rather than a classic TABLES parameter).
+func isTableExid(exid string) bool { return exid == "h" }

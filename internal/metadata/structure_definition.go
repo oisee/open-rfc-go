@@ -183,3 +183,31 @@ func requiredStructScalar(scalars []classicrfc.Scalar, name string) ([]byte, err
 	}
 	return nil, fmt.Errorf("%w: response lacks scalar %s", ErrStructureDefinition, name)
 }
+
+// RowStructureName inspects a RFC_GET_STRUCTURE_DEFINITION result and returns the
+// structure name the FIELDS rows actually belong to. When the queried name is a
+// TABLE TYPE, RFC_FIELDS returns the fields of its row (line) structure — whose
+// TableName differs from the queried table-type name. The caller can then resolve
+// that row structure instead of the (unresolvable) table type. Returns "" if the
+// FIELDS all belong to the queried name (i.e. it is an ordinary structure).
+func RowStructureName(queried string, fields []cpic.Field) (string, error) {
+	result, err := classicrfc.DecodeResult(fields)
+	if err != nil {
+		return "", err
+	}
+	for _, t := range result.Tables {
+		if t.Name != "FIELDS" {
+			continue
+		}
+		for _, row := range t.Rows {
+			f, err := DecodeRfcFieldsRow(row)
+			if err != nil {
+				return "", err
+			}
+			if f.TableName != "" && f.TableName != queried {
+				return f.TableName, nil
+			}
+		}
+	}
+	return "", nil
+}
