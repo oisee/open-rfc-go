@@ -54,29 +54,9 @@ var ex *rfc.ABAPException
 if errors.As(err, &ex) { /* typed ABAP-side failure */ }
 ```
 
-**Be an RFC server / lab** — make this host answer real SM59 destinations. Point
-a destination's target host at this box; the connection type and system number
-pick the mode:
-
-```sh
-go run ./cmd/rfc-lab -target-host <your-real-sap-host>
-#   sys 00  ports 3200/3300  transparent sniffer → the real system (captures the wire)
-#   sys 11  port  3311       our state-machine server: Connection/Unicode tests go green
-#   sys 12  port  3312       content-addressed server: a whole ABAP program runs green
-#   type H  port  8000       our HTTP responder
-#   type W  port  44300      our WebSocket upgrade
-```
-
-**Inspect the wire** — a framing-aware proxy and a decoder that speaks our own
-protocol stack:
-
-```sh
-go run ./cmd/rfc-sniffer -listen :3300 -target <sap-host>:3300 -dump cap.jsonl
-go run ./cmd/rfc-viewer cap.jsonl          # decoded transcript (values redacted)
-```
-
-**Drive RFC from the shell or an AI** — a CLI and an MCP server over the same
-client (connection from `.rfc.json`, env, or flags):
+**Drive RFC from the shell or an AI** — `rfc` is the client: a CLI, and (as
+`rfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
+or flags:
 
 ```sh
 export SAP_ASHOST=sap.example SAP_USER=DEVELOPER SAP_PASSWORD=…   # or a .rfc.json system
@@ -86,8 +66,19 @@ go run ./cmd/rfc describe STFC_STRUCTURE               # FM interface as an MCP-
 go run ./cmd/rfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
 go run ./cmd/rfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
 
-# MCP server (stdio): every matching FM becomes a tool an assistant can call
-go run ./cmd/rfc-mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
+# MCP server (stdio, like `vsp mcp`): every matching FM becomes a tool an assistant can call
+go run ./cmd/rfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
+```
+
+**Sniff & emulate** — `rfc-lab` runs a transparent sniffer and a generating
+("conscious") server together; point SM59 type-3 destinations at this box, then
+decode captures offline with `rfc-viewer`:
+
+```sh
+go run ./cmd/rfc-lab -target-host <your-real-sap-host>
+#   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
+#   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
+go run ./cmd/rfc-viewer cap-lab.jsonl      # decoded transcript (values redacted)
 ```
 
 ## Status
@@ -97,8 +88,9 @@ go run ./cmd/rfc-mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`cmd/rfc-mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools**. Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
-| **Next** | RFC callback (server→client) on the client; per-FM `outputSchema` + HTTP transport for `rfc-mcp`; finish the generating server |
+| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`rfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools**. Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
+| **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
+| **Next** | per-FM `outputSchema` + HTTP transport for `rfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 

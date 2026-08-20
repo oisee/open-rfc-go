@@ -61,6 +61,7 @@ Usage:
   rfc search <pattern>         find RFC-enabled FMs (name mask, * wildcard; --all = any)
   rfc read-table <table>       read a table (RFC_READ_TABLE) as rows of columns
   rfc ping                     connection test (RFC_PING)
+  rfc mcp [--expose m] [--hide m]  run the MCP server (stdio) over this client
 
 Flags:
   --file <path>                read call params (JSON object) from a file
@@ -124,6 +125,8 @@ func run(cmd string, args []string) error {
 			}
 			return emit(r)
 		})
+	case "mcp":
+		return runMCP(args)
 	case "search":
 		if len(args) < 1 {
 			return fmt.Errorf("usage: rfc search <pattern>")
