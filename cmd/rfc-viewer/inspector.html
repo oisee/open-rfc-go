@@ -143,6 +143,20 @@
   .frame.sc { --dircol: var(--server); }
 
   .badge { font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+  .badge.b-cb { background: var(--warn-bg); color: var(--warn); }
+  .badge.b-meta { background: rgba(128,128,128,.16); color: var(--faint); }
+  /* Frame classification: a colour-coded accent on the spine side of each frame. */
+  .frame > summary { border-inline-start: 3px solid transparent; }
+  .frame.cat-gw > summary { border-inline-start-color: var(--server); }
+  .frame.cat-logon > summary { border-inline-start-color: var(--spine); }
+  .frame.cat-meta > summary { border-inline-start-color: var(--faint); }
+  .frame.cat-call > summary { border-inline-start-color: var(--client); }
+  .frame.cat-callback > summary { border-inline-start-color: var(--warn); }
+  .frame.cat-ok > summary { border-inline-start-color: var(--ok); }
+  .frame.cat-exc > summary, .frame.cat-err > summary { border-inline-start-color: var(--err); }
+  .frame.cat-appc > summary { border-inline-start-color: var(--spine); }
+  .search { font-family: var(--mono); font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); min-width: 220px; }
+  .search:focus-visible { outline: 2px solid var(--spine); outline-offset: 1px; }
   .b-gw { color: var(--gw); background: var(--gw-bg); }
   .b-appc { color: var(--appc); background: var(--appc-bg); }
   .b-req { color: var(--req); background: var(--req-bg); }
@@ -199,6 +213,7 @@
     <input type="file" id="file" accept=".json,application/json">
     <span class="spacer"></span>
     <label class="chk"><input type="checkbox" id="callsOnly"> CALL FUNCTION only</label>
+    <input class="search" id="search" type="search" placeholder="filter: function / param / text" autocomplete="off">
   </div>
 
   <div class="paste" id="pasteBox">
@@ -219,6 +234,7 @@ const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","ga
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
   let callsOnly = false;
+  let searchQuery = "";
   let current = SAMPLE;
 
   function groupConnections(frames) {
@@ -233,17 +249,30 @@ const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","ga
     return groups;
   }
 
-  function badge(f) {
-    if (f.layer === "gateway") return `<span class="badge b-gw">GATEWAY</span>`;
-    if (f.layer === "raw") return `<span class="badge b-err">RAW</span>`;
+  // Metadata plumbing FMs (interface/structure/search) — dimmed as "METADATA".
+  const META_FN = /^(RFC_GET_FUNCTION_INTERFACE|RFC_GET_STRUCTURE_DEFINITION|DDIF_|RFC_METADATA|RFC_FIELDS|RFC_FUNCTION_SEARCH|RFC_GET_UNICODE)/;
+  // classify sorts a frame into a category (drives the badge and the frame's
+  // colour accent). A request travelling S->C is a server-initiated callback.
+  function classify(f) {
+    if (f.layer === "gateway") return { cat: "gw", label: "GATEWAY" };
+    if (f.layer === "raw") return { cat: "err", label: "RAW" };
     const c = f.cut;
     if (c) {
-      if (c.kind === "request") return `<span class="badge b-req">CALL FUNCTION</span>`;
-      if (c.kind === "response") return (c.success ? `<span class="badge b-ok">RESPONSE</span>` : `<span class="badge b-err">EXCEPTION</span>`);
-      if (c.kind === "error") return `<span class="badge b-err">DECODE ERR</span>`;
-      if (c.kind === "cpic") return `<span class="badge b-cpic">CPIC</span>`;
+      if (c.kind === "request") {
+        if (f.dir === "S->C") return { cat: "callback", label: "CALLBACK" };
+        if (META_FN.test(c.function || "")) return { cat: "meta", label: "METADATA" };
+        return { cat: "call", label: "CALL FUNCTION" };
+      }
+      if (c.kind === "response") return c.success ? { cat: "ok", label: "RESPONSE" } : { cat: "exc", label: "EXCEPTION" };
+      if (c.kind === "error") return { cat: "err", label: "DECODE ERR" };
+      if (c.kind === "cpic") return { cat: "logon", label: "CPIC / LOGON" };
     }
-    return `<span class="badge b-appc">${esc(f.appc || "APPC")}</span>`;
+    return { cat: "appc", label: esc(f.appc || "APPC") };
+  }
+  const CAT_BADGE = { gw: "b-gw", err: "b-err", callback: "b-cb", meta: "b-meta", call: "b-req", ok: "b-ok", exc: "b-err", logon: "b-cpic", appc: "b-appc" };
+  function badge(f) {
+    const k = classify(f);
+    return `<span class="badge ${CAT_BADGE[k.cat] || "b-appc"}">${k.label}</span>`;
   }
 
   function titleOf(f) {
@@ -303,8 +332,25 @@ const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","ga
     return false;
   }
 
+  // frameText is the searchable text of a frame (function, params, values…).
+  function frameText(f) {
+    const parts = [f.appc, classify(f).label];
+    const c = f.cut;
+    if (c) {
+      parts.push(c.function, c.exceptionKey, c.outcome);
+      (c.imports || []).forEach((p) => parts.push(p.name, p.value));
+      (c.exports || []).forEach((p) => parts.push(p.name, p.value));
+      (c.tables || []).forEach((t) => parts.push(t.name));
+      (c.outputs || []).forEach((o) => parts.push(o));
+    }
+    return parts.filter(Boolean).join(" ").toLowerCase();
+  }
+
   function render() {
-    const frames = (current.frames || []).filter((f) => !callsOnly || (f.cut && (f.cut.kind === "request" || f.cut.kind === "response" || f.cut.kind === "error")));
+    const q = (searchQuery || "").toLowerCase();
+    const frames = (current.frames || []).filter((f) =>
+      (!callsOnly || (f.cut && (f.cut.kind === "request" || f.cut.kind === "response" || f.cut.kind === "error"))) &&
+      (!q || frameText(f).includes(q)));
     const out = $("#out");
     if (!frames.length) { out.innerHTML = `<div class="empty">No frames to show. Load a capture or the sample.</div>`; renderStats([]); return; }
     const groups = groupConnections(frames);
@@ -313,7 +359,7 @@ const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","ga
         const side = f.dir === "C->S" ? "cs" : "sc";
         const dOpen = ""; // collapsed by default
         const detailHtml = hasDetail(f) ? `<div class="detail">${detailOf(f)}</div>` : "";
-        const cls = `frame ${side}${hasDetail(f) ? " has-detail" : ""}`;
+        const cls = `frame ${side} cat-${classify(f).cat}${hasDetail(f) ? " has-detail" : ""}`;
         return `<div class="row2"><details class="${cls}"${dOpen}>
             <summary><span class="fmeta">#${f.index} · ${f.len}B</span> ${badge(f)} <span class="title">${titleOf(f)}</span></summary>
             ${detailHtml}
@@ -361,6 +407,7 @@ const SAMPLE = {"frames":[{"dir":"C->S","index":0,"len":64,"layer":"gateway","ga
   });
   $("#sampleBtn").addEventListener("click", () => load(SAMPLE));
   $("#callsOnly").addEventListener("change", (e) => { callsOnly = e.target.checked; render(); });
+  $("#search").addEventListener("input", (e) => { searchQuery = e.target.value; render(); });
 
   render();
 </script>
