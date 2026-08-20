@@ -18,3 +18,5 @@ testdata/fuzz/
 /rfc-lab
 /rfc-viewer
 /callz
+/cmd/callz/
+/cmd/oracle/

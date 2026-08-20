@@ -225,6 +225,18 @@ func (c *Client) structureDefinitionOn(ctx context.Context, sess *lifecycle.Mana
 	}
 	def, err := metadata.DecodeRfcStructureDefinitionResult(name, res.Fields)
 	if err != nil {
+		// A table type resolves via RFC_FIELDS to its row (line) structure, whose
+		// fields belong to that row, not the queried table-type name. Dereference
+		// to the row structure and resolve that instead.
+		if row, rerr := metadata.RowStructureName(name, res.Fields); rerr == nil && row != "" && row != name {
+			rdef, rerr2 := c.structureDefinitionOn(ctx, sess, row)
+			if rerr2 == nil {
+				c.mu.Lock()
+				c.structCache[name] = rdef
+				c.mu.Unlock()
+				return rdef, nil
+			}
+		}
 		return rfctypes.RfcStructureDefinition{}, fmt.Errorf("%w: %v", ErrProtocol, err)
 	}
 	c.mu.Lock()
