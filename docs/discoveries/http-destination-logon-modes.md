@@ -51,7 +51,7 @@ That decodes in three layers: hex → base64 → the ASCII string `v=1U,` follow
 by 768 hex characters, i.e. **384 opaque bytes**.
 
 Those 384 bytes are not a field chain and not readable. Measured entropy is
-7.7 bits per byte over 218 distinct values, and **all three captures differ from
+7.45 bits per byte over 200 distinct values, and **all three captures differ from
 the first byte** — so the envelope is encrypted and carries a nonce or a
 timestamp. 384 bytes is exactly a 3072-bit block, which is consistent with the
 credentials being sealed with the target system's key from its PSE.
