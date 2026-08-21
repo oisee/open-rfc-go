@@ -60,6 +60,10 @@ const (
 	TagClient           Tag = 0x0114
 	TagLanguage         Tag = 0x0115
 	TagPassword         Tag = 0x0117
+	// TagTicket carries an SAP logon ticket in place of a password. The value is
+	// the ticket's base64 text (the MYSAPSSO2 string) encoded UTF-16LE. Derived
+	// clean-room from our own capture; see docs/discoveries.
+	TagTicket Tag = 0x0670
 	TagProgram          Tag = 0x0130
 	TagLogonStatus      Tag = 0x0161
 	TagParameterName    Tag = 0x0201

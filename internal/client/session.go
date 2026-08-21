@@ -74,6 +74,7 @@ type LogonOptions struct {
 	Client          string
 	User            string
 	Password        string
+	Ticket          string // SAP logon ticket, used instead of Password when set
 	Language        string // default "E"
 	PartnerHostName string // default os.Hostname()
 	KernelRelease   string
@@ -346,7 +347,7 @@ func (s *Session) LogonAndPing(ctx context.Context, opts LogonOptions) error {
 		return err
 	}
 	req, err := cpic.EncodeInitialLogonRequest(cpic.InitialLogonRequestInput{
-		Client: opts.Client, User: opts.User, Password: opts.Password, Language: language,
+		Client: opts.Client, User: opts.User, Password: opts.Password, Ticket: opts.Ticket, Language: language,
 		ClientAddress: s.localAddress, PartnerHostName: partnerHost, Destination: s.destination,
 		ProgramName: s.programName, KernelRelease: opts.KernelRelease, FunctionName: "RFCPING", SessionID: sessionID,
 	})
