@@ -90,3 +90,36 @@ block — neither tells us the CPIC field. What it does confirm is the ticket
 *format* is one format across carriers, and that our HTTP routes (ADT, and the
 SOAP RFC endpoint) can be driven by a ticket alone, which was verified
 separately the same day.
+
+## Addendum: the type-T lead, and what capturing it would take
+
+SM59's **type-T** (TCP/IP Connection) destination has, unlike type-3, a
+*Logon with Ticket* block with **Send Logon Ticket Without Ref. to a Target
+System** and **Send Assertion Ticket for Dedicated Target System** — and type-T
+is CPIC, not HTTP. So this is the one destination that would put a ticket into
+the classic-RFC logon, in the very field we could not observe.
+
+Capturing it is not a configuration click, though:
+
+- **Registered Server Program** routes the call — and the ticket — to an
+  external program that has registered a Program ID at the gateway. Our server
+  (`internal/rfcserver`, `cmd/rfc-lab`) only listens and sniffs; it does not dial
+  out to a gateway and register (`F_SAP_GW` register, `TP_NAME`). The gateway
+  record codec exists (`internal/gateway`), so the registration handshake is
+  implementable, but it is real work.
+- **Start on Explicit Host** (the other activation type) starts a program on the
+  named host via the gateway; it never reaches us.
+
+So the capture needs one of: (a) gateway registration implemented in our server,
+so it can *be* the registered program the gateway hands the ticket to; or (b) a
+genuine registered server routed through our sniffer's 3300, so the ticket
+passes in transit.
+
+**Parked, deliberately.** A ticket already authenticates every HTTP path (ADT
+and the SOAP RFC endpoint), verified live, and the ticket format already
+decodes. Ticket-based *classic-RFC* logon is completeness, not capability — it
+matters only on a landscape with neither an open HTTP surface nor a gateway
+password, which we do not currently have. When it does matter, the decisive
+experiment is: implement gateway registration in `rfc-lab`, point a type-T
+destination's Program ID at it with *Send Assertion Ticket* on, and read the
+inbound logon.
