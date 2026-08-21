@@ -107,6 +107,9 @@ func paramSchema(p classicrfc.FunintParameter, resolve func(string) map[string]a
 	case isStructureExid(p.Exid):
 		return resolve(p.TableName)
 	}
+	// A parameter's length arrives in characters (FUNINT), a structure field's in
+	// bytes (RFC_FIELDS). Halving both made every CHAR parameter claim half its
+	// real length, and a CHAR1 claim maxLength 0 — which rejects every value.
 	sc := fieldSchema(p.Exid, p.InternalLength, p.Decimals)
 	if p.ParameterText != "" {
 		sc["description"] = p.ParameterText
@@ -118,16 +121,19 @@ func paramSchema(p classicrfc.FunintParameter, resolve func(string) map[string]a
 func structSchema(def rfctypes.RfcStructureDefinition) map[string]any {
 	props := map[string]any{}
 	for _, f := range def.Fields {
-		props[f.FieldName] = fieldSchema(f.Exid, f.InternalLength, f.Decimals)
+		// RFC_FIELDS reports a Unicode field's length in bytes: two per character.
+		props[f.FieldName] = fieldSchema(f.Exid, f.InternalLength/2, f.Decimals)
 	}
 	return map[string]any{"type": "object", "description": def.Name, "properties": props}
 }
 
-// fieldSchema maps one classic RFC EXID to a JSON Schema type.
-func fieldSchema(exid string, internalLength, decimals int32) map[string]any {
+// fieldSchema maps one classic RFC EXID to a JSON Schema type. charLength is the
+// field's length in characters — callers convert, because the two metadata
+// sources disagree on the unit.
+func fieldSchema(exid string, charLength, decimals int32) map[string]any {
 	switch exid {
 	case "C", "N":
-		s := map[string]any{"type": "string", "maxLength": int(internalLength / 2)}
+		s := map[string]any{"type": "string", "maxLength": int(charLength)}
 		if exid == "N" {
 			s["pattern"] = "^[0-9]*$"
 		}
