@@ -123,6 +123,36 @@ The ADT path is the one to lead with: "install nothing" is the difference
 between a tool someone can try and a tool someone must be persuaded to deploy.
 The facade stays as the fallback and as the typed, small-payload option.
 
+### And writing works too — where HTTP cannot
+
+The same pinned session was then used to *edit* an object, in four separate HTTP
+requests:
+
+```
+POST /sap/bc/adt/oo/classes/zcl_adt_debug_p2?_action=LOCK&accessMode=MODIFY
+  → 200, LOCK_HANDLE=B92AEF9F…, IS_LOCAL=X, MODIFICATION_SUPPORT=NoModification
+PUT  /sap/bc/adt/oo/classes/zcl_adt_debug_p2/source/main?lockHandle=B92AEF9F…
+  → 200                       (a separate request, and the handle still worked)
+POST …?_action=UNLOCK&lockHandle=B92AEF9F…            → 200
+POST /sap/bc/adt/activation?method=activate           → activated
+```
+
+Three things follow.
+
+1. **A lock survives across calls on a pinned conversation.** Over HTTP it does
+   not survive across tool invocations, which is why vsp's `EDITSOURCE` has to
+   lock, write, unlock and activate inside a single call, and why a plain `LOCK`
+   in one call plus `UPDATE_SOURCE` in the next fails with
+   `ExceptionResourceInvalidLockHandle`. Over RFC that restriction disappears.
+2. **The object edited here is one HTTP could not even lock.** `ZCL_ADT_DEBUG_P2`
+   answered `MODIFICATION_SUPPORT=NoModification`, which vsp's client read as
+   "read-only" and refused — while SAP was handing back a perfectly good handle
+   and accepting the write. Editing over RFC is therefore not merely equivalent
+   to editing over HTTP; on this system it is strictly more capable.
+3. **Activate after unlock, not before.** Activation while still holding the
+   lock is refused with `403 … User CLAUDE is currently editing …` — the object's
+   own ENQUEUE blocks it. vsp's HTTP flow already has this order right.
+
 ### The older question this also answers
 
 Not necessarily, and this was the most interesting thread left.
