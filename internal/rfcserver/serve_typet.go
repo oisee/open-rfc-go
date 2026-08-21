@@ -4,7 +4,6 @@ package rfcserver
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"net"
 
@@ -121,12 +120,7 @@ func ServeTypeT(conn net.Conn, d *Dispatcher, logf func(string), dump func(dir s
 				log("CALL: encode error: " + werr.Error())
 				return
 			}
-			wrapped, werr := wrapFSapSend(respCUT, convID, binary.BigEndian.Uint16(got[4:6]))
-			if werr != nil {
-				log("CALL: wrap error: " + werr.Error())
-				return
-			}
-			if send(wrapped) != nil {
+			if send(wrapFSapSendTypeT(respCUT, got, convID)) != nil {
 				return
 			}
 
@@ -135,6 +129,33 @@ func ServeTypeT(conn net.Conn, d *Dispatcher, logf func(string), dump func(dir s
 		}
 	}
 }
+
+// wrapFSapSendTypeT builds the F_SAP_SEND reply record for the type-T path. The
+// generic wrapFSapSend emits the type-3 / S4 record (protocol=2, gatewayID=1),
+// which this client will not recognise as its response and blocks on. A real
+// type-T reply record uses a different header (protocol=7, gatewayID=0, and a
+// specific info/vector/return-code set), and echoes the request's uid at [4:6].
+// We clone a captured type-T reply header (cap-zdouble.jsonl) and patch only the
+// per-connection fields, then append the (already classic-serialized) content.
+func wrapFSapSendTypeT(content, requestFrame, convID []byte) []byte {
+	hdr := append([]byte(nil), typeTReplyHeaderBase...)
+	if len(requestFrame) >= 6 {
+		copy(hdr[4:6], requestFrame[4:6]) // echo the request uid
+	}
+	if len(convID) == 8 {
+		copy(hdr[40:48], convID)
+	}
+	out := make([]byte, 0, len(hdr)+len(content))
+	out = append(out, hdr...)
+	out = append(out, content...)
+	return out
+}
+
+// typeTReplyHeaderBase is a real 80-byte type-T F_SAP_SEND reply record header
+// captured live (cap-zdouble.jsonl). wrapFSapSendTypeT patches its uid and
+// conversation id; the rest (protocol, info/vector, return codes, operation
+// info) stands. No credentials.
+var typeTReplyHeaderBase = mustHexTC("06cb070063ac0000000000000000000001000000000200000000000002000108000000120000000034303530363837340000010b000000020000010b0000000000000000003131303000000000060001")
 
 // indexCutRequest finds the CUT function-request prefix (05 02 00 00) at or
 // after min, or -1. In a plain call it sits right after the 80-byte header; in a

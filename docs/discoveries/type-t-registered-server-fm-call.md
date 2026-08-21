@@ -1,10 +1,18 @@
 # Type-T registered server: answering a live FM call
 
-Status: **transport + handshake + dispatch proven live; blocked on the fast
-serializer** (the same wall as the type-3 conscious server). This records the
-first time a real ABAP `CALL FUNCTION ... DESTINATION` reached an open-rfc-go
-registered server, was decoded, and got a response the client accepted past its
-GUID check.
+Status: **DONE — a live `CALL FUNCTION ... DESTINATION` is answered end to end.**
+`Z_CALL_RFC` on A4H drove `Z_DOUBLE` and `Z_GREET` over `ZSNIFF_TCP` into
+`ServeTypeT`; both returned correct values with `sy-subrc = 0`:
+
+```
+GREETING = "Hello, Claude! — from open-rfc-go type-T server"
+RC01 = 0   RC02 = 0   RESULT = 42        (Z_DOUBLE: 21 -> 42)
+```
+
+This is the first time an open-rfc-go registered server answered real function
+calls through the live SAP gateway. Below is the whole journey — the handshake,
+the trusted CUT, the GUID, the serializer, and the reply record framing that was
+the last piece.
 
 Every fact here is `[capture]` from our own live runs against A4H (a4h-105 in the
 `i5`/`ubullama` docker host), decoded clean-room. No credentials appear on this
@@ -105,28 +113,28 @@ live: the call CUT now decodes fully — `N raw = 15 00 00 00` (21, LE), so our
 `Z_DOUBLE` handler computes `RESULT = 42` and dispatches. **The request side is
 solved.**
 
-**What remains — the reply record framing.** The client still blocks on our
-response. The reply is not a serializer problem now but an **APPC record-header**
-one: the real gateway reply mirrors the request record header, ours does not.
+**Last piece — the reply record framing (solved).** Our content was already
+correct: decoding our 502-byte reply as a field chain gives the full classic-S4
+envelope with `0x0203 = 2a 00 00 00` (RESULT = 42). The block was the **APPC
+record header**, not the content. `wrapFSapSend` builds the type-3 / S4 data
+record (protocol=2, gatewayID=1); the client did not recognise it as its response
+and hung. A real type-T reply record differs:
 
 ```
-real type-T reply hdr: 06 cb 07 00 <uid=63ac> 00 00 ...   [2:4]=0700, echoes request uid, [6:8]=0000
-our wrapFSapSend hdr:  06 cb 02 00 <uid>       00 01 ...   [2:4]=0200,               [6:8]=0001
+real type-T reply hdr: 06 cb 07 00 <uid=63ac> 00 00 ...   protocol=7, echoes request uid, gatewayID=0
+our wrapFSapSend hdr:  06 cb 02 00 <uid>       00 01 ...   protocol=2,                    gatewayID=1
 ```
 
-`wrapFSapSend` builds the type-3 / S4 data record (`appc.EncodeDataRecord`,
-gatewayID=1); the type-T reply is a different record layout that echoes the
-request's `[2:6]` and differs in a dozen header bytes (7,13,16,19,20,27,28,30,
-31,35,...). The reply **content** also differs: the real reply has no `0x0503`
-response-context or `0x0500` response-start tags that `EncodeCutFunctionResponseS4`
-emits — it opens `01 01 00 08 03 01 01 ...`.
+and further in info3=1, info4=2, padding=0x0100, info=1, vector=8, appcRC=18. The
+fix (`wrapFSapSendTypeT`) clones a captured 80-byte type-T reply header, patches
+only the per-connection fields (uid echoed from the request `[4:6]`, conversation
+id), and appends our unchanged content. With that, the client consumed the reply
+and returned `RESULT=42` / `GREETING` / `sy-subrc=0`.
 
-We have **no positive success reply to copy**: rfcexec cannot answer `Z_DOUBLE`,
-so its 347-byte reply is a `system_failure` exception (header is reusable as a
-template, content is not). Finishing this needs either a type-T reply built from
-the request record header (mirror `[2:6]`, zero the return codes, gateway-style
-record) plus a type-T content envelope reverse-engineered from the error reply,
-or a positive capture from some registered server that does answer the call.
+(The 347-byte reply we had been comparing against was rfcexec's `system_failure`
+*exception* — its content envelope legitimately differs from a success reply, so
+the "no 0x0503/0x0500" observation was a red herring; the header was the real
+lesson, and it is content-agnostic.)
 
 ### Progress ladder (each rung proven live, in order)
 
@@ -136,7 +144,19 @@ or a positive capture from some registered server that does answer the call.
 4. trusted CUT located and `Z_DOUBLE` decoded — ok
 5. GUID omitted, response accepted past the consistency check — ok
 6. classic serializer → imports decode, `N=21`, `RESULT=42` — ok
-7. reply record header / content envelope the client will consume — **open**
+7. type-T reply record header (`wrapFSapSendTypeT`) → client consumes the reply,
+   `RC=0` — **ok**
+
+## Still open (not blocking)
+
+- **Fast serializer.** This worked only because the destination was forced to the
+  classic serializer. A default (fast) destination sends fast-RFC params and
+  expects a fast-RFC reply, which we do not yet speak. Implementing the fast-RFC
+  container decode/encode remains the general unlock (it blocks full type-3 calls
+  too). The `5=` bits in `RFCDES` select the serializer per destination.
+- **Non-echo fields in the accept / reply header** are cloned from a live capture
+  (uid, conv, GUID block are patched; the rest stands). Good enough for this
+  driver; a fully synthesised header would need each field explained.
 
 ## Tooling
 
