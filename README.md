@@ -87,8 +87,29 @@ session.Call(ctx, "ZADT_DEBUG_RFC", rfc.Params{"I_OP": "step", "I_KIND": "over"}
 Live on A4H: a breakpoint set from one connection, hit by a function module
 called over a *second* connection, attached to, and stepped through — with the
 stack showing the real RFC entry chain `%_RFC_START` → `REMOTE_FUNCTION_CALL` →
-the module. The facade and driver live in
+the module.
+
+**And it needs nothing installed on the server.** SAP's own ADT debugger
+resources — the ones Eclipse drives — reach the same place through
+`SADT_REST_RFC_ENDPOINT` on a pinned conversation:
+
+```
+POST /sap/bc/adt/debugger/listeners?debuggingMode=user&requestUser=…   → the debuggee that stopped
+POST /sap/bc/adt/debugger?method=attach&debuggeeId=…                   → attached
+GET  /sap/bc/adt/debugger/stack?method=getStack                        → dbg:stack, source URIs and all
+POST /sap/bc/adt/debugger?method=stepOver                              → dbg:step
+```
+
+A stateless HTTP client cannot use these, because ADT keeps the debug session in
+an ABAP roll area and can only find it again through a `sap-contextid` cookie.
+Over RFC the roll area *is* the conversation, so there is nothing to correlate —
+and the answers come back with everything ADT knows: per-frame source URIs, DYNP
+screen frames, authorization flags, the action catalogue. SAP itself labels the
+session `RFC session: <instance>`.
+
+Driver and the optional typed ABAP facade:
 [vibing-steampunk](https://github.com/oisee/vibing-steampunk) (`vsp rfc debug`).
+Full write-up: [`reports/debugger-over-rfc.md`](reports/debugger-over-rfc.md).
 
 **Sniff & emulate** — `rfc-lab` runs a transparent sniffer and a generating
 ("conscious") server together; point SM59 type-3 destinations at this box, then
@@ -114,7 +135,7 @@ go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhos
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
 | **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`rfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
-| **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`): external breakpoints, listen, attach, step, stack — live-verified against A4H |
+| **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`) — **including SAP's own ADT debugger resources, with nothing installed on the server**: listen, attach, step, stack, live-verified against A4H |
 | **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
 | **Next** | per-FM `outputSchema` + HTTP transport for `rfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
