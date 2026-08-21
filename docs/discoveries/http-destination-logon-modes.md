@@ -136,3 +136,32 @@ password, which we do not currently have. When it does matter, the decisive
 experiment is: implement gateway registration in `rfc-lab`, point a type-T
 destination's Program ID at it with *Send Assertion Ticket* on, and read the
 inbound logon.
+
+## Addendum 2: impersonating the gateway got us to conversation-established
+
+2026-08-21, topology B built and run live (`cmd/rfc-ticketcatch`,
+`internal/rfcserver/serve_ticketcatch.go`). Our process played the gateway for a
+type-T *Registered Server Program* destination whose Gateway Host pointed at us.
+Progression across runs, each a real SM59 connection test:
+
+| Our accept | SAP result |
+|---|---|
+| none (real gateway, nothing registered) | `679` transaction program not registered |
+| 80-byte header, zeroed return codes | `225` Unknown CPIC function (frame too short / malformed) |
+| **125-byte real reject frame with return codes zeroed** | **no ABEND — conversation established**; SAP then sent two `NI_PING` frames |
+| same, plus we answer `NI_PING`→`NI_PONG` | `757` client has not answered PING messages (timing/role dependent) |
+
+So the accept verdict reading was right: a real gateway response frame with
+`appcReturnCode`/`sapReturnCode` zeroed is accepted, and the client proceeds past
+allocate. The wall is the next phase — NI keepalive cadence and which side sends
+the logon first in the registered-server model — which behaves differently run to
+run and which we are guessing blind, because we hold no capture of a *successful*
+registered-server conversation.
+
+**Decisive next step, not more guessing: a positive capture.** Run the kernel's
+`rfcexec` as a registered server (`rfcexec -a VSP_TICKET_CATCH -g <gwhost> -x
+sapgw00`) on the SAP host, call it through the sniffer, and record the real
+accept → keepalive → logon sequence. Then `serve_ticketcatch` reproduces it
+exactly, and the client's logon — carrying the ticket when the destination is set
+to send one — lands in our existing `internal/cpic` decoder. The instrument that
+got us this far is committed; only the reference capture is missing.
