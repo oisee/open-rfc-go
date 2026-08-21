@@ -70,6 +70,26 @@ go run ./cmd/rfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
 go run ./cmd/rfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
 ```
 
+**Debug ABAP over RFC** — a pinned conversation is a stable ABAP session, which
+is exactly what the debugger needs: `attach_debuggee( )` hands back an object
+reference and every later operation hangs off it. So `Client.Pin` plus a thin
+ABAP facade gives real breakpoints, attach, and stepping — no SAP GUI, no
+Eclipse, no WebSocket:
+
+```go
+session, _ := c.Pin(ctx)      // one connection, one roll area, held open
+defer session.Close()
+session.Call(ctx, "ZADT_DEBUG_RFC", rfc.Params{"I_OP": "listen", "I_TIMEOUT": 120})
+session.Call(ctx, "ZADT_DEBUG_RFC", rfc.Params{"I_OP": "attach", "I_DEBUGGEE_ID": id})
+session.Call(ctx, "ZADT_DEBUG_RFC", rfc.Params{"I_OP": "step", "I_KIND": "over"})
+```
+
+Live on A4H: a breakpoint set from one connection, hit by a function module
+called over a *second* connection, attached to, and stepped through — with the
+stack showing the real RFC entry chain `%_RFC_START` → `REMOTE_FUNCTION_CALL` →
+the module. The facade and driver live in
+[vibing-steampunk](https://github.com/oisee/vibing-steampunk) (`vsp rfc debug`).
+
 **Sniff & emulate** — `rfc-lab` runs a transparent sniffer and a generating
 ("conscious") server together; point SM59 type-3 destinations at this box, then
 decode captures offline with `rfc-viewer`:
@@ -94,6 +114,7 @@ go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhos
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
 | **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`rfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
+| **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`): external breakpoints, listen, attach, step, stack — live-verified against A4H |
 | **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
 | **Next** | per-FM `outputSchema` + HTTP transport for `rfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
