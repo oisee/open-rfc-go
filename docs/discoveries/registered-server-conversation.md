@@ -97,3 +97,30 @@ UTF-16LE wrapper, base64-decode, then the existing ticket TLV reader), and
 ticket base64 as UTF-16LE) — the latter is ticket-based classic-RFC logon, the
 thing the whole hunt was for. The byte-level detail is in the gitignored
 `.private/gold/ticket-in-logon.md`; the raw ticket stays out of the repo.
+
+## Live test of direct ticket logon: rejected (and why it is informative)
+
+2026-08-21, our client run on the host `.105` against the real gateway
+(`127.0.0.1:3300`). A **password** logon succeeds (`rfc ping` → ok). A **ticket**
+logon with the same client — the ticket in field `0x0670` as UTF-16LE base64,
+password field omitted — is **rejected**, and the raw response (dumped with
+`SAP_DEBUG_LOGON=1`) ends in the text **"Name or password is incorrect (repeat
+logon)"**.
+
+So the `0x0670` encoding that a real SAP client composes and a registered server
+*accepts* (proven with rfcexec) is **not** accepted in a **direct** client→AS
+logon. The direct format differs — likely the user field must be empty (the
+ticket carries the user), or a different field/flag marks a ticket logon. Pinning
+it needs a positive capture of a real *direct* ticket logon, which we do not have
+(our captures are the relayed, server-side form). Parked there.
+
+Second finding, independently fixable: that reject is a well-formed CPIC error
+response (status field `0x0161`, message field `0x0402` carrying the text), yet
+`DecodeInitialLogonResponse` reports "initial CPIC logon error response has an
+invalid preamble". Its error-preamble grammar is too strict for this reject
+variant, so genuine "wrong credential" failures surface as a parser error rather
+than the message. The raw bytes are captured; fixing the grammar turns the
+useless error into "Name or password is incorrect". Backlog.
+
+The `SAP_DEBUG_LOGON` env (dumps the raw logon response to stderr) is kept as a
+debugging aid for exactly this kind of diagnosis.
