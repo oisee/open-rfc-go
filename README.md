@@ -107,8 +107,16 @@ and the answers come back with everything ADT knows: per-frame source URIs, DYNP
 screen frames, authorization flags, the action catalogue. SAP itself labels the
 session `RFC session: <instance>`.
 
-Driver and the optional typed ABAP facade:
+Driver and the typed ABAP facade:
 [vibing-steampunk](https://github.com/oisee/vibing-steampunk) (`vsp rfc debug`).
+
+*Which path to pick is not only a technical question.* "Install nothing" is a
+usability argument; on a customer system the rules may point the other way,
+because SAP's API Policy expressly carves out custom-developed ABAP interfaces
+on-premise while saying nothing so clear about SAP-delivered but unpublished
+function modules. The terrain, with sources, is mapped in
+[`reports/eclipse-mcp-integration.md`](reports/eclipse-mcp-integration.md) —
+which also covers SAP's own MCP server, shipped inside Eclipse ADT since 3.60.
 Full write-up: [`reports/debugger-over-rfc.md`](reports/debugger-over-rfc.md).
 
 **The debugger is only the hard case.** `SADT_REST_RFC_ENDPOINT` carries an
