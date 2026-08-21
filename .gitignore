@@ -21,3 +21,6 @@ testdata/fuzz/
 /cmd/callz/
 /cmd/oracle/
 .rfc.json
+
+# Research notes kept out of the public repo.
+.private/

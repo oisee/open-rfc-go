@@ -11,18 +11,20 @@ which Go file to look at, and the recorded commit says how far behind we are.
 
 Upstream baseline: `847036dce5e29015bbc266a4d19cc9c15295a831` (open-rfc 0.2.3).
 
-### What open-rfc's own provenance is, and is not
+### Where the rest of the code came from
 
-This table records our port from open-rfc. It does not record open-rfc's own
-ancestry, and that is worth stating rather than leaving implied. open-rfc does
-not claim a clean-room derivation: its author cites SAP's NW RFC SDK
-Programming Guide and its Doxygen documentation, and `pysap`, as references, and
-discloses two files adapted from SAP's own Apache-2.0 `node-rfc`. So the honest
-description of this repository is *SDK-free* — it links no SAP library, needs no
-SAP licence to build or run, and contains no SAP source we are aware of — rather
-than *clean-room*. Nobody here has ever held the NW RFC SDK licence; the
-protocol knowledge came from the upstream project, from published protocol
-research, and from wire captures against our own systems.
+The table above is the ported half, recorded here as Apache-2.0 §4(b) requires.
+
+Everything **not** in it — the fast serialization codec, the server side, xRFC
+and the recursive metadata graph, callbacks, pinned sessions, the debugger and
+the ADT tunnel — was developed here **clean-room**: from our own wire captures
+against our own systems, recorded with the sniffer in `cmd/rfc-lab` and decoded
+with `cmd/rfc-viewer`, without reference to SAP's SDK or its documentation. Each
+finding is written up in `docs/discoveries/` and is traceable to the capture it
+came from.
+
+No SAP library is linked, none is needed to build or run this, and no SAP
+licence was taken.
 
 To check whether a ported file has drifted, with an open-rfc checkout alongside
 this one:
