@@ -62,9 +62,70 @@ Note `ABDBG_EXTDBPS.BREAKPOINT` and `.ATTRIBUTES` are LOB columns, so
 `RFC_READ_TABLE` returns the keys but not the payload; program and line come
 from the facade's `bp_list`.
 
-## 4. Does the facade have to exist? — the Eclipse question
+## 4. The facade does not have to exist — SAP's own debugger runs over RFC
 
-Not necessarily, and this is the most interesting thread left.
+**Proven the same day.** Eclipse's debugger is not TPDAPI: it is a set of ADT
+REST resources — `/sap/bc/adt/debugger/listeners`, `/sap/bc/adt/debugger`,
+`/sap/bc/adt/debugger/stack` — which are themselves ABAP over TPDAPI. All of
+them work through `SADT_REST_RFC_ENDPOINT` on a pinned conversation, with
+**nothing installed on the server**:
+
+```
+dbg> eclipse 120        # POST /debugger/listeners → attach → GET /debugger/stack
+0242AC1100111FE1A79FC4D1F60AF8A2 (CLAUDE) at SAPLZADT_DEBUG/LZADT_DEBUGU01:9 — FUGR/FF ZADT_DEBUG_LOOP
+<dbg:stack …><stackEntry stackPosition="4" … line="9" eventType="FUNCTION" eventName="ZADT_DEBUG_LOOP" isActive="true"
+   adtcore:uri="/sap/bc/adt/functions/groups/zadt_debug/fmodules/zadt_debug_loop/source/main#start=9,0"/>…
+
+dbg> estep over
+<dbg:step … debugSessionId="…" processId="2897" isUserAuthorizedForChanges="true"
+   sessionTitle="RFC session: vhcala4hci_A4H_00" isSteppingPossible="true" stepSizeMode="LINE">
+  <dbg:actions>…commitWork, rollbackWork, memorySnapshot, garbageCollector, stepSize…</dbg:actions>
+
+dbg> estack             # line moved 9 → 14
+```
+
+Note what the ADT answer carries that a hand-written facade would have to
+reinvent: source URIs per frame, the **DYNP screen frame** (`SAPMSSY1` screen
+3004) our own projection did not even show, the authorization flags, the process
+id, and the whole action catalogue. SAP labels the session itself
+`"RFC session: vhcala4hci_A4H_00"`.
+
+Why this works, in one line: ADT keeps the debug session in an ABAP roll area
+and a stateless HTTP client can only reach it again through a `sap-contextid`
+cookie — **over RFC the roll area *is* the conversation**, so there is nothing
+to correlate.
+
+Three practical notes, each paid for in failed attempts:
+
+- **Send an `Accept` header, and make it `*/*`.** ADT rejects a request without
+  one before reaching the resource ("Accept header missing"); naming a concrete
+  type instead turns that into `406` for every resource with a different one
+  (discovery insists on `atomsvc+xml`, the listener answers
+  `application/vnd.sap.as+xml`).
+- **Listen and attach must be one step.** A debuggee is attachable only while it
+  waits; a human copying the id from one command into the next loses the race,
+  and ADT says so precisely — `CX_ABDBG_ACTEXT_CANNOT_ATTACH`, subType
+  `invalidDebuggee`, later `noSessionAttached` on the stack.
+- The errors that came back were **domain errors from `CL_TPDA_ADT_RES_DEBUGGER`**,
+  not transport errors. The tunnel was never the problem.
+
+### So which path should exist?
+
+| | ADT over RFC | `ZADT_DEBUG` facade |
+|---|---|---|
+| Install on the server | **nothing** | a function group |
+| Payload | ADT's own XML, source URIs, DYNP frames, actions | flat JSON, five fields per frame |
+| Variables | SAP's full typed model, for free | not written yet |
+| Works where ADT resources are missing/blocked | no | yes |
+| Typed RFC parameters instead of XML | no | yes |
+
+The ADT path is the one to lead with: "install nothing" is the difference
+between a tool someone can try and a tool someone must be persuaded to deploy.
+The facade stays as the fallback and as the typed, small-payload option.
+
+### The older question this also answers
+
+Not necessarily, and this was the most interesting thread left.
 
 Eclipse does not use TPDAPI directly either. It drives **ADT REST resources** —
 `/sap/bc/adt/debugger/listeners`, `.../debuggee`, steps, stack, variables — which
