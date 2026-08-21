@@ -56,6 +56,32 @@ the first byte** — so the envelope is encrypted and carries a nonce or a
 timestamp. 384 bytes is exactly a 3072-bit block, which is consistent with the
 credentials being sealed with the target system's key from its PSE.
 
+## The ticket itself decodes — and that is useful on its own
+
+Both the browser cookie and the assertion header parse cleanly with our own
+code: a 5-byte header (`02` version, `4103` code page) followed by a TLV run,
+`id(1) len(2 BE) value`. The fields, confirmed against two real tickets:
+
+| id | meaning | form |
+|---|---|---|
+| `0x01` | user | UTF-16 |
+| `0x02` | client | UTF-16 digits |
+| `0x03` | issuing system | UTF-16 |
+| `0x04` | creation timestamp | UTF-16 `YYYYMMDDhhmmss` |
+| `0x0f` | (portal codepage marker) | |
+| `0xff` | signature | **PKCS#7 SignedData** (`06 09 2a 86 48 86 f7 0d 01 07 02`) |
+
+The assertion ticket differs from the browser one exactly where it should: it
+adds `0x10` = the **recipient system** (`A4H`) and `0x08`, and drops the
+browser's `0x06` portal flag. So an assertion ticket is *addressed* — the target
+is inside the payload, which is what "for dedicated target system" means — while
+the browser ticket is general. Same envelope, one extra field.
+
+The practical consequence: because we can read the envelope, we can tell whose
+ticket we hold, for which system, and whether it has expired, before making any
+network call — a clear error instead of a rejected logon. That is worth a small
+reader on its own, independent of whether ticket-based *RFC* logon ever lands.
+
 ## The conclusion for the ticket hunt
 
 Nothing here reveals how a ticket rides classic RFC. The HTTP path either sends
