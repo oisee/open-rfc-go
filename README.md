@@ -111,6 +111,20 @@ Driver and the optional typed ABAP facade:
 [vibing-steampunk](https://github.com/oisee/vibing-steampunk) (`vsp rfc debug`).
 Full write-up: [`reports/debugger-over-rfc.md`](reports/debugger-over-rfc.md).
 
+**The debugger is only the hard case.** `SADT_REST_RFC_ENDPOINT` carries an
+arbitrary HTTP request, so *any* ADT resource is reachable the same way — source
+read and write, activation, ATC, unit tests, transports, search, refactoring:
+the whole surface, over the gateway port, where ICF is closed, HTTPS terminates
+somewhere inconvenient, or CSRF and cookies are a fight. Proven so far:
+`discovery` (200, 299 KB), program source (200 with `ETag`/`Last-Modified`), a
+missing object (404 with ADT's own exception document), and the debugger's
+listen/attach/stack/step.
+
+The stateful half is the interesting part. ADT locks are bound to an ABAP
+session, which is exactly what a short-lived HTTP client cannot keep — but a
+pinned conversation can, so lock-then-write across two calls should work over
+RFC where it does not over HTTP. That one is next to test.
+
 **Sniff & emulate** — `rfc-lab` runs a transparent sniffer and a generating
 ("conscious") server together; point SM59 type-3 destinations at this box, then
 decode captures offline with `rfc-viewer`:
