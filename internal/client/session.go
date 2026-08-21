@@ -358,6 +358,9 @@ func (s *Session) LogonAndPing(ctx context.Context, opts LogonOptions) error {
 	if err != nil {
 		return err
 	}
+	if os.Getenv("SAP_DEBUG_LOGON") != "" {
+		fmt.Fprintf(os.Stderr, "[logon-response] %d bytes: %x\n", len(response), response)
+	}
 	decoded, err := cpic.DecodeInitialLogonResponse(response)
 	if err != nil {
 		return fmt.Errorf("%w: CPIC logon response is malformed: %v", ErrSession, err)
