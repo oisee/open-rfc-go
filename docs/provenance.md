@@ -11,6 +11,19 @@ which Go file to look at, and the recorded commit says how far behind we are.
 
 Upstream baseline: `847036dce5e29015bbc266a4d19cc9c15295a831` (open-rfc 0.2.3).
 
+### What open-rfc's own provenance is, and is not
+
+This table records our port from open-rfc. It does not record open-rfc's own
+ancestry, and that is worth stating rather than leaving implied. open-rfc does
+not claim a clean-room derivation: its author cites SAP's NW RFC SDK
+Programming Guide and its Doxygen documentation, and `pysap`, as references, and
+discloses two files adapted from SAP's own Apache-2.0 `node-rfc`. So the honest
+description of this repository is *SDK-free* — it links no SAP library, needs no
+SAP licence to build or run, and contains no SAP source we are aware of — rather
+than *clean-room*. Nobody here has ever held the NW RFC SDK licence; the
+protocol knowledge came from the upstream project, from published protocol
+research, and from wire captures against our own systems.
+
 To check whether a ported file has drifted, with an open-rfc checkout alongside
 this one:
 
