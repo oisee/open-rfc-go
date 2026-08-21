@@ -66,3 +66,34 @@ and the only place a forwarded ticket rides classic RFC. With the real accept
 (`0xcf`) frame captured, `serve_ticketcatch` can be finished from a positive
 example rather than guesswork, and once the ticket field is located, ticket-based
 RFC logon becomes implementable.
+
+## Resolved: the CPIC field that carries a forwarded ticket
+
+Derived from our own capture (`.private/gold/`), clean-room — this field is named
+in neither Wireshark's dissectors nor pysap.
+
+A forwarded SAP logon ticket rides the CPIC logon in field **`0x0670`**, chained
+`prev=0x0002 → 0x0670 → 0x0114` (right after the repeated local-host field,
+immediately before the client). Its value is the ticket's base64 text — the same
+`MYSAPSSO2` string the HTTP header carries — laid down as **UTF-16LE** (each
+base64 character followed by `0x00`). In the 2800-byte capture the field value is
+992 bytes = 496 UTF-16 units ≈ 495 base64 characters ≈ 370 decoded ticket bytes.
+
+Stripping the UTF-16LE wrapper yields byte-for-byte the same ticket object the
+HTTP path carries: the `02`/`4103` header, user/client/issuing-system/timestamp,
+the assertion recipient field, and the `0xff` PKCS#7 SignedData signature. Only
+the transport wrapper differs between HTTP (`MYSAPSSO2` cookie/header, plain
+base64) and classic RFC (CPIC field `0x0670`, base64-as-UTF-16LE).
+
+Cross-checked across four SM59 modes: no-ticket logons omit the field entirely;
+with `Send Assertion Ticket` the field appears and the recipient inside it tracks
+the configured target (`A4H`/`001` vs the bogus `SNIFF`/`999`), which is what
+confirms it is the assertion ticket and not something else.
+
+**What this unlocks.** Both directions are now specified against
+`internal/cpic`: *reading* a ticket from a logon (find `0x0670`, drop the
+UTF-16LE wrapper, base64-decode, then the existing ticket TLV reader), and
+*composing* one into an outbound logon (emit `0x0670` in the chain with the
+ticket base64 as UTF-16LE) — the latter is ticket-based classic-RFC logon, the
+thing the whole hunt was for. The byte-level detail is in the gitignored
+`.private/gold/ticket-in-logon.md`; the raw ticket stays out of the repo.
