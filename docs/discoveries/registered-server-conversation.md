@@ -124,3 +124,56 @@ useless error into "Name or password is incorrect". Backlog.
 
 The `SAP_DEBUG_LOGON` env (dumps the raw logon response to stderr) is kept as a
 debugging aid for exactly this kind of diagnosis.
+
+## Leg 2: the client-sent side, and why our direct attempt was wrong
+
+2026-08-21. With rfcexec registered at the real gateway, the ABAP client was
+routed through an **in-container** sniffer (127.0.0.1:3388 → 127.0.0.1:3300) so
+the whole path stayed local — a sniffer on any other host is refused by the
+gateway ACLs (`RC 756` for registration via a proxy, `RC 748` "access to
+registered server is not permitted" for a proxied client). Inside the container
+the connection test went green and the client's own frames were captured.
+
+**The client-sent conversation:**
+
+| dir | fn | bytes | meaning |
+|---|---|---|---|
+| C→S | `0x03` | 64 | gateway record |
+| C→S | `0xca` | 453 | ALLOCATE |
+| S→C | `0xca` | 125 | **the client-side ACCEPT** (function code `0xca`, not the server-side `0xcf`) |
+| C→S | `0xcb` | 2714–2800 | **F_SAP_SEND** carrying the client's logon + the ticket |
+| S→C | `0xcb` | 241 | reply |
+
+Two conclusions.
+
+1. **The client-side ticket is the same field, same encoding.** In the `0xcb`
+   frame the ticket sits at the same place: chain `prev=0x0002 → 0x0670 → len
+   0x03d8 (984) → value`, the value being the base64 ticket as UTF-16LE
+   (`41 00 6a 00 51 00…` = "AjQ…"). So the gateway passes the ticket field
+   through unchanged; only the frame's function code differs (`0xcb` client-side
+   vs `0x03` server-side).
+
+2. **The ticket rides a CUT, not the initial CPIC logon.** This is why our
+   direct attempt failed. We put `0x0670` into the *initial* logon
+   (`EncodeInitialLogonRequest`, the `0x03` record whose chain uses tags
+   `0x0101`/`0x0111`/`0x0114`/`0x0117`). The real client authenticates with the
+   ticket in a **separate `F_SAP_SEND` CUT** whose chain is `0x0002`-linked and
+   carries `0x0670`. The initial logon and the ticket-bearing CUT are different
+   frames with different chains; the AS ignored `0x0670` in the initial logon and
+   fell through to password auth ("Name or password is incorrect").
+
+### Two wins, one wall
+
+- **Win — role Y (gateway impersonation) is now buildable from a positive
+  example:** the client-side ACCEPT is `0xca`, 125 bytes, captured here.
+  `serve_ticketcatch` can send the real accept instead of the guessed one.
+- **Win — the ticket encoding is confirmed identical on both sides:** `0x0670`,
+  UTF-16LE base64, so `internal/cpic`'s ticket reader/writer is correct as a
+  *field* codec.
+- **Wall — direct client→AS ticket logon still unknown.** Every capture we have
+  is the *registered-server* flow, where the ticket rides an `F_SAP_SEND` CUT. A
+  direct client→AS logon (what JCo does with `jco.client.mysapsso2`) may place
+  the ticket in the initial logon or in a CUT of its own — we cannot tell without
+  a capture of a real direct ticket-logon client (a JCo/SDK program through the
+  sniffer). Until then, ticket-based *direct* RFC logon stays unimplemented; the
+  field codec and the HTTP ticket paths are done.
