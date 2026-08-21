@@ -433,7 +433,8 @@ func graphNodeSchema(g metadata.Graph, node metadata.TypeNode, depth int) map[st
 
 func graphFieldSchema(g metadata.Graph, f metadata.MetadataField, depth int) map[string]any {
 	if f.Reference.Kind == "scalar" {
-		return fieldSchema(f.InternalType, int32(f.UcLength), int32(f.Decimals))
+		// UcLength is the Unicode byte length: two bytes per character.
+		return fieldSchema(f.InternalType, int32(f.UcLength/2), int32(f.Decimals))
 	}
 	target, ok := g.Nodes[f.Reference.TargetType]
 	if !ok || f.Reference.Cyclic || depth > maxGraphSchemaDepth {
