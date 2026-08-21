@@ -42,6 +42,10 @@ type Destination struct {
 	Client           string // ABAP client, e.g. "001"
 	User             string
 	Password         string
+	// Ticket logs on with an SAP logon ticket (MYSAPSSO2) instead of a password,
+	// for systems where a browser single sign-on is the only credential to hand.
+	// Any wire form is accepted; see internal/cpic NormalizeTicket.
+	Ticket           string
 	Language         string // default "E"
 	Service          string // dispatcher service name, sapdpNN
 	ProgramName      string // default "open-rfc"
@@ -101,6 +105,7 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 			Client:   d.Client,
 			User:     d.User,
 			Password: d.Password,
+			Ticket:   d.Ticket,
 			Language: d.Language,
 		}); err != nil {
 			_ = sess.Close()

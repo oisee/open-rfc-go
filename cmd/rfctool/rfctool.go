@@ -26,6 +26,7 @@ type System struct {
 	Client   string   `json:"client"`
 	User     string   `json:"user"`
 	Password string   `json:"password"`
+	Ticket   string   `json:"ticket"` // SAP logon ticket (MYSAPSSO2), instead of a password
 	Lang     string   `json:"lang"`
 	Expose   []string `json:"expose"`   // green-list FM name masks (rfc-mcp)
 	Hide     []string `json:"hide"`     // red-list masks (rfc-mcp)
@@ -95,6 +96,9 @@ func (c Config) resolve(name string) (System, error) {
 	} else if p := os.Getenv("SAP_PASSWD"); p != "" {
 		sys.Password = p
 	}
+	if t := os.Getenv("SAP_TICKET"); t != "" {
+		sys.Ticket = t
+	}
 	if sys.Ashost == "" {
 		return System{}, fmt.Errorf("no host: set SAP_ASHOST or a system in .rfc.json (system %q)", name)
 	}
@@ -133,6 +137,7 @@ func OpenWithTimeout(ctx context.Context, name string, timeout time.Duration) (*
 		Client:           sys.Client,
 		User:             sys.User,
 		Password:         sys.Password,
+		Ticket:           sys.Ticket,
 		Language:         string([]rune(strings.ToUpper(lang))[0:1]),
 	})
 	if err != nil {

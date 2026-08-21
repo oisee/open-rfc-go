@@ -56,6 +56,12 @@ type InitialLogonRequestInput struct {
 	Client               string
 	User                 string
 	Password             string
+	// Ticket, when set, logs on with an SAP logon ticket instead of a password:
+	// the credential field becomes TagTicket (0x0670) carrying the ticket's
+	// base64 text as UTF-16LE, and the password field is omitted. Give it the
+	// ticket in any of its wire forms (canonical base64, the cookie form with
+	// '!' for '/', or URL-escaped); NormalizeTicket sorts it out.
+	Ticket               string
 	Language             string
 	ClientAddress        string
 	PartnerSystem        string
@@ -185,6 +191,14 @@ func EncodeInitialLogonRequest(input InitialLogonRequestInput) ([]byte, error) {
 		return nil, err
 	}
 
+	// The credential is either a password (TagPassword) or a logon ticket
+	// (TagTicket): a real ticket-bearing logon carries the ticket field and no
+	// password field at all, so we swap rather than add.
+	credential := Field{Tag: uint16(TagPassword), Value: password}
+	if input.Ticket != "" {
+		credential = Field{Tag: uint16(TagTicket), Value: encodeTicketField(input.Ticket)}
+	}
+
 	fields := []Field{
 		{Tag: uint16(TagStart), Value: nil},
 		{Tag: uint16(TagProtocolVersion), Value: initialProtocolVersion},
@@ -193,7 +207,7 @@ func EncodeInitialLogonRequest(input InitialLogonRequestInput) ([]byte, error) {
 		{Tag: uint16(TagSession), Value: sessionID},
 		{Tag: uint16(TagClient), Value: []byte(input.Client)},
 		{Tag: uint16(TagUser), Value: user},
-		{Tag: uint16(TagPassword), Value: password},
+		credential,
 		{Tag: uint16(TagLanguage), Value: []byte(upperASCII(input.Language))},
 		{Tag: uint16(TagUnicodeIndicator), Value: []byte{1}},
 		{Tag: uint16(TagClientAddress), Value: clientAddress},
