@@ -72,6 +72,8 @@ Usage:
   rfc search <pattern>         find RFC-enabled FMs (name mask, * wildcard; --all = any)
   rfc read-table <table>       read a table (RFC_READ_TABLE) as rows of columns
   rfc ping                     connection test (RFC_PING)
+  rfc session [-c "a; b"]      pin one connection and run several calls on it,
+                               for protocols that keep state in the ABAP session
   rfc mcp [--expose m] [--hide m]  run the MCP server (stdio) over this client
 
 Flags:
@@ -138,6 +140,8 @@ func run(cmd string, args []string) error {
 			}
 			return emit(r)
 		})
+	case "session":
+		return runSession(ctx, args)
 	case "mcp":
 		return runMCP(args)
 	case "search":
