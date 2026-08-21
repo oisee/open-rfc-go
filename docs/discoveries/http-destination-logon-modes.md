@@ -115,6 +115,19 @@ so it can *be* the registered program the gateway hands the ticket to; or (b) a
 genuine registered server routed through our sniffer's 3300, so the ticket
 passes in transit.
 
+**Tried the cheap capture, 2026-08-21 — it cannot work.** A type-T *Registered
+Server Program* destination was pointed with its Gateway Host at our sniffer and
+*Send Assertion Ticket* switched on, then connection-tested. The idea was that
+the routing request would pass through the sniffer even though nothing is
+registered. It did pass through — a 453-byte ALLOCATE to the gateway naming the
+destination, the program id `VSP_TICKET_CATCH`, `%%RFCSERVER%%` and the caller
+`CLAUDE` — but **it carries no ticket**. The test failed at ALLOCATE
+(`CM_ALLOCATE_FAILURE_RETRY`, "Transaction program not registered") *before* any
+CPIC conversation opened. The logon, and with it the ticket, is only sent once a
+registered server accepts the conversation. So a sniffer in transit can never
+see it: our server has to *be* the registered program and accept, and only then
+does the ticket-bearing logon arrive.
+
 **Parked, deliberately.** A ticket already authenticates every HTTP path (ADT
 and the SOAP RFC endpoint), verified live, and the ticket format already
 decodes. Ticket-based *classic-RFC* logon is completeness, not capability — it
