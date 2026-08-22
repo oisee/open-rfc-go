@@ -63,18 +63,18 @@ func stripSystemFlag(args []string) []string {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `rfc — call SAP classic RFC function modules (SDK-free)
+	fmt.Fprint(os.Stderr, `saprfc — call SAP classic RFC function modules (SDK-free)
 
 Usage:
-  rfc info                     show system info (RFC_SYSTEM_INFO)
-  rfc describe <FM>            print the FM interface as an MCP-tool JSON Schema
-  rfc call <FM> [json]         call the FM; params as inline JSON, --file, or --stdin
-  rfc search <pattern>         find RFC-enabled FMs (name mask, * wildcard; --all = any)
-  rfc read-table <table>       read a table (RFC_READ_TABLE) as rows of columns
-  rfc ping                     connection test (RFC_PING)
-  rfc session [-c "a; b"]      pin one connection and run several calls on it,
-                               for protocols that keep state in the ABAP session
-  rfc mcp [--expose m] [--hide m]  run the MCP server (stdio) over this client
+  saprfc info                     show system info (RFC_SYSTEM_INFO)
+  saprfc describe <FM>            print the FM interface as an MCP-tool JSON Schema
+  saprfc call <FM> [json]         call the FM; params as inline JSON, --file, or --stdin
+  saprfc search <pattern>         find RFC-enabled FMs (name mask, * wildcard; --all = any)
+  saprfc read-table <table>       read a table (RFC_READ_TABLE) as rows of columns
+  saprfc ping                     connection test (RFC_PING)
+  saprfc session [-c "a; b"]      pin one connection and run several calls on it,
+                                  for protocols that keep state in the ABAP session
+  saprfc mcp [--expose m] [--hide m]  run the MCP server (stdio) over this client
 
 Flags:
   --file <path>                read call params (JSON object) from a file
@@ -115,7 +115,7 @@ func run(cmd string, args []string) error {
 		})
 	case "describe":
 		if len(args) < 1 {
-			return fmt.Errorf("usage: rfc describe <FM>")
+			return fmt.Errorf("usage: saprfc describe <FM>")
 		}
 		return withClient(ctx, func(c *rfc.Client) error {
 			tool, err := c.DescribeTool(ctx, strings.ToUpper(args[0]))
@@ -126,7 +126,7 @@ func run(cmd string, args []string) error {
 		})
 	case "call":
 		if len(args) < 1 {
-			return fmt.Errorf("usage: rfc call <FM> [json] | --file f | --stdin")
+			return fmt.Errorf("usage: saprfc call <FM> [json] | --file f | --stdin")
 		}
 		fn := strings.ToUpper(args[0])
 		params, err := readParams(args[1:])
@@ -146,12 +146,12 @@ func run(cmd string, args []string) error {
 		return runMCP(args)
 	case "search":
 		if len(args) < 1 {
-			return fmt.Errorf("usage: rfc search <pattern>")
+			return fmt.Errorf("usage: saprfc search <pattern>")
 		}
 		return runSearch(ctx, args)
 	case "read-table", "read_table", "readtable":
 		if len(args) < 1 {
-			return fmt.Errorf("usage: rfc read-table <table> [--where ..] [--fields ..] [--top N]")
+			return fmt.Errorf("usage: saprfc read-table <table> [--where ..] [--fields ..] [--top N]")
 		}
 		return runReadTable(ctx, args)
 	default:
