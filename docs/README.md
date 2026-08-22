@@ -11,6 +11,7 @@
 | [Live test plan](live-test-plan.md) | You have a real SAP system and want to verify against it |
 | [Porting plan](porting-plan.md) | What is next, and why in that order |
 | [Provenance](provenance.md) | Which Go file came from which upstream file, and what changed |
+| [Discoveries](discoveries/) | What the wire actually does — one write-up per finding, each traceable to its capture |
 | [Surface inventories](surface/) | Cited signatures and constants for the unported layers |
 
 ## Reading orders
