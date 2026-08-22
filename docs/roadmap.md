@@ -10,24 +10,24 @@ SOCKS5) has landed.
 > live round-trip (`STFC_DEEP_STRUCTURE`/`STFC_DEEP_TABLE`, STRING/XSTRING), and
 > **every scalar type** (incl. STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP,
 > FLOAT, UTCLONG). The client now calls essentially any FM. Two new tracks are
-> added below: an **RFC tool surface** (`rfc` CLI + `saprfc mcp`) and
+> added below: an **RFC tool surface** (`rfc` CLI + `orfc mcp`) and
 > **RFC callback** support.
 
 ## New tracks (added 2026-08-20)
 
 | Rank | Item | Rationale |
 |---|---|---|
-| ✅ **P0 done** | RFC tool surface — `rfc` CLI + `saprfc mcp` MCP server | Built and live-verified. `cmd/saprfc`: info/describe/search/call/read-table/ping. `cmd/rfc-mcp`: JSON-RPC-2.0 stdio server, dependency-free; generic tools rfc_info/ping/describe/search/read_table/call **plus autodiscovery** — `--expose`/`--hide` masks turn matching RFC-enabled FMs into real per-FM MCP tools (inputSchema = the FM's interface). `describe`/per-FM tools share one EXID→JSON-Schema mapper (`Client.DescribeTool`). Config via `.rfc.json` (named systems + expose/hide/readOnly) + env + flags (flags win); shared `cmd/rfctool`. Core `rfc` stays dependency-free; the `cmd/*` set is an extractable subproject. See the design notes below. |
+| ✅ **P0 done** | RFC tool surface — `orfc` CLI + `orfc mcp` MCP server | Built and live-verified. `cmd/orfc`: info/describe/search/call/read-table/ping. `orfc mcp`: JSON-RPC-2.0 stdio server, dependency-free; generic tools rfc_info/ping/describe/search/read_table/call **plus autodiscovery** — `--expose`/`--hide` masks turn matching RFC-enabled FMs into real per-FM MCP tools (inputSchema = the FM's interface). `describe`/per-FM tools share one EXID→JSON-Schema mapper (`Client.DescribeTool`). Config via `.rfc.json` (named systems + expose/hide/readOnly) + env + flags (flags win); shared `cmd/orfctool`. Core `rfc` stays dependency-free; the `cmd/*` set is an extractable subproject. See the design notes below. |
 | ✅ **P1 done** | RFC **callback** (server→client, DESTINATION 'BACK') on the client | Done: `Session.CallWithCallbacks` runs a re-entrant loop that dispatches inbound callback requests to per-FM handlers (`rfc.Destination.Callbacks`) and replies until the response arrives. Verified live vs A4H (directly, through the sniffer, and a real .105↔.103 callback via A4H@SNIFF), `STFC_CONNECTION_BACK`/`ZSTFC_CONNECTION_BACK` with NRBACK=1..3. |
-| 🟡 **P1 first cut** | Safety gate for write FMs in `saprfc mcp` beyond `--read-only` | Done (tier 1): `--safe` blocks/hides heuristically-write FMs (mutating name verbs) and `BAPI_TRANSACTION_COMMIT` (unless `--allow-commit`); tools carry `readOnlyHint`/`destructiveHint`. Remaining: the interface-signal + LLM-deep-dive tiers and the conditional per-parameter policy file. Full design: [`docs/design/write-fm-safety.md`](design/write-fm-safety.md). |
+| 🟡 **P1 first cut** | Safety gate for write FMs in `orfc mcp` beyond `--read-only` | Done (tier 1): `--safe` blocks/hides heuristically-write FMs (mutating name verbs) and `BAPI_TRANSACTION_COMMIT` (unless `--allow-commit`); tools carry `readOnlyHint`/`destructiveHint`. Remaining: the interface-signal + LLM-deep-dive tiers and the conditional per-parameter policy file. Full design: [`docs/design/write-fm-safety.md`](design/write-fm-safety.md). |
 
 ### RFC tool surface — design notes & open items (thought through 2026-08-20)
 
 Shipped shape: **generic describe+call** (RFC has tens of thousands of FMs — can't
 pre-generate a tool per FM like odata-mcp does per entity), **plus opt-in
 autodiscovery** that renders a *curated* subset as real per-FM MCP tools. One
-`RFC-interface → JSON-Schema` mapper backs both `saprfc describe` and the per-FM
-tools. Three config sources (flags > env > `.rfc.json`), a shared `cmd/rfctool`,
+`RFC-interface → JSON-Schema` mapper backs both `orfc describe` and the per-FM
+tools. Three config sources (flags > env > `.rfc.json`), a shared `cmd/orfctool`,
 core stays dependency-free.
 
 Open items / decisions still to make:
@@ -48,9 +48,9 @@ Open items / decisions still to make:
 - **Config ergonomics.** `.rfc.json` mirrors `.vsp.json`; consider an
   `--expose-file` list, SAProuter/SOCKS fields, and a redacted `rfc config`/`rfc
   systems` command. Never require the password in the file (env supported).
-- **Extraction.** `cmd/saprfc` (CLI + `saprfc mcp`) and `cmd/rfctool` depend only on public
+- **Extraction.** `cmd/orfc` (CLI + `orfc mcp`) and `cmd/orfctool` depend only on public
   `rfc`; extraction = move them to a new module requiring open-rfc-go.
-- **Library `ReadTable`.** `cmd/rfctool.ReadTable` is a candidate to promote into
+- **Library `ReadTable`.** `cmd/orfctool.ReadTable` is a candidate to promote into
   the public `rfc` package (roadmap P1 "typed ReadTable").
 
 The whole wire implementation lives under `internal/`; the public `rfc/` package

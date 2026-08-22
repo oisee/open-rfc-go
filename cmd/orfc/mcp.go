@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// saprfc mcp is a Model Context Protocol server over stdio that exposes the SDK-free
+// orfc mcp is a Model Context Protocol server over stdio that exposes the SDK-free
 // RFC client as a small set of generic tools: rfc_info, rfc_ping, rfc_describe,
 // rfc_search, rfc_read_table, and rfc_call. `rfc_describe` returns an FM interface
 // as an MCP-tool JSON Schema; `rfc_call` runs any function module with native
@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oisee/open-rfc-go/cmd/rfctool"
+	"github.com/oisee/open-rfc-go/cmd/orfctool"
 	"github.com/oisee/open-rfc-go/rfc"
 )
 
@@ -81,7 +81,7 @@ func runMCP(cliArgs []string) error {
 		}
 	}
 	// Config (.rfc.json) provides defaults; command-line flags win.
-	opts := rfctool.LoadOptions(mcpSystem)
+	opts := orfctool.LoadOptions(mcpSystem)
 	if !exposeSet {
 		exposeMasks = opts.Expose
 	}
@@ -230,7 +230,7 @@ func resolveExposed(ctx context.Context) []map[string]any {
 		var candidates []string
 		for _, m := range exposeMasks {
 			like := strings.ReplaceAll(strings.ToUpper(m), "*", "%")
-			rows, err := rfctool.ReadTable(ctx, c, "TFDIR", "FMODE IN ( 'R', 'X' ) AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
+			rows, err := orfctool.ReadTable(ctx, c, "TFDIR", "FMODE IN ( 'R', 'X' ) AND FUNCNAME LIKE '"+like+"'", []string{"FUNCNAME"}, 0)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "rfc-mcp: expose:", err)
 				continue
@@ -450,7 +450,7 @@ func search(ctx context.Context, c *rfc.Client, a map[string]any) (any, error) {
 		where += " AND PNAME LIKE 'SAPL" + strings.ToUpper(strings.ReplaceAll(g, "*", "%")) + "%'"
 	}
 	top := intVal(a["top"], 100)
-	return rfctool.ReadTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, top)
+	return orfctool.ReadTable(ctx, c, "TFDIR", where, []string{"FUNCNAME", "PNAME"}, top)
 }
 
 func readTableArgs(ctx context.Context, c *rfc.Client, a map[string]any) (any, error) {
@@ -460,7 +460,7 @@ func readTableArgs(ctx context.Context, c *rfc.Client, a map[string]any) (any, e
 			fields = append(fields, strings.ToUpper(strVal(f)))
 		}
 	}
-	return rfctool.ReadTable(ctx, c, strings.ToUpper(strVal(a["table"])), strVal(a["where"]), fields, intVal(a["top"], 0))
+	return orfctool.ReadTable(ctx, c, strings.ToUpper(strVal(a["table"])), strVal(a["where"]), fields, intVal(a["top"], 0))
 }
 
 func strVal(v any) string { s, _ := v.(string); return s }
@@ -490,7 +490,7 @@ var (
 
 func client(ctx context.Context) (*rfc.Client, error) {
 	clientOnce.Do(func() {
-		sharedC, _, clientErr = rfctool.Open(ctx, mcpSystem)
+		sharedC, _, clientErr = orfctool.Open(ctx, mcpSystem)
 	})
 	return sharedC, clientErr
 }

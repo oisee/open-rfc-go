@@ -4,7 +4,7 @@
 // rfc-mcp server: connection config (.rfc.json + environment), opening a client,
 // and a RFC_READ_TABLE helper. It depends only on the public rfc package so the
 // whole cmd/ tool set can be extracted into a standalone repository.
-package rfctool
+package orfctool
 
 import (
 	"context"

@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/oisee/open-rfc-go/cmd/rfctool"
+	"github.com/oisee/open-rfc-go/cmd/orfctool"
 	"github.com/oisee/open-rfc-go/rfc"
 )
 
-// `saprfc session` is the pinned-conversation primitive on the command line. Most
+// `orfc session` is the pinned-conversation primitive on the command line. Most
 // calls do not care which connection they take, and Client.Call is right for
 // them. Some protocols do care, because the server keeps state in the ABAP
 // session between calls: an attached debugger (ATTACH_DEBUGGEE returns an
@@ -32,7 +32,7 @@ func runSession(ctx context.Context, args []string) error {
 		}
 	}
 
-	c, _, err := rfctool.OpenWithTimeout(ctx, systemName, callTimeout)
+	c, _, err := orfctool.OpenWithTimeout(ctx, systemName, callTimeout)
 	if err != nil {
 		return err
 	}

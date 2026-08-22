@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// rfc-typet impersonates the gateway *and* the registered server for a type-T
-// destination and ANSWERS the function calls the client makes — the smaller
-// sibling of the type-3 conscious server (a registered server authenticates no
-// one, so there is no logon/serializer negotiation to fake).
+// orfc-srv is the server front door: it answers real ABAP function calls, in
+// either of the two roles a destination can address.
+//
+//	-mode typet   registered external server (SM59 type T). The gateway has
+//	              already authenticated the caller, so there is no logon to fake
+//	              and no serializer to negotiate.
+//	-mode type3   an ABAP system (SM59 type 3). Mirrors the caller's session
+//	              tokens and generates the logon accept, then dispatches.
+//
+// Point an SM59 destination at this process and every CALL FUNCTION against it
+// lands in the dispatcher below — which is how you test a Z function module
+// against our implementation without a second SAP system.
 //
 // Live drive: point an SM59 type-T destination's Gateway Host at this box
 // (progid does not matter — we accept any), then from ABAP call, e.g.
@@ -20,6 +28,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -71,15 +80,21 @@ func ztstDispatcher() *rfcserver.Dispatcher {
 }
 
 func main() {
-	listen := ":3300"
-	if len(os.Args) > 1 {
-		listen = os.Args[1]
+	mode := flag.String("mode", "typet", "server role: typet (registered server) or type3 (ABAP system)")
+	listen := flag.String("listen", ":3300", "address to listen on")
+	dumpPath := flag.String("dump", "cap-srv.jsonl", "capture file (tagged JSONL); frames may contain credentials")
+	flag.Parse()
+
+	serve := rfcserver.ServeTypeT
+	switch *mode {
+	case "typet":
+	case "type3":
+		serve = rfcserver.ServeConscious
+	default:
+		fmt.Fprintf(os.Stderr, "unknown -mode %q: want typet or type3\n", *mode)
+		os.Exit(2)
 	}
-	dumpPath := "cap-typet.jsonl"
-	if len(os.Args) > 2 {
-		dumpPath = os.Args[2]
-	}
-	df, err := os.Create(dumpPath)
+	df, err := os.Create(*dumpPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -93,20 +108,25 @@ func main() {
 		_ = enc.Encode(map[string]any{"dir": dir, "len": len(frame), "hex": hex.EncodeToString(frame)})
 	}
 
-	ln, err := net.Listen("tcp", listen)
+	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	d := ztstDispatcher()
-	fmt.Printf("rfc-typet: type-T registered-server on %s, dump -> %s\n", listen, dumpPath)
-	fmt.Println("point an SM59 type-T destination's Gateway Host here, then CALL FUNCTION ... DESTINATION <it>")
+	fmt.Printf("orfc-srv: %s server on %s, dump -> %s\n", *mode, *listen, *dumpPath)
+	if *mode == "typet" {
+		fmt.Println("point an SM59 type-T destination's Gateway Host here, then CALL FUNCTION ... DESTINATION <it>")
+	} else {
+		fmt.Println("point an SM59 type-3 destination's Target Host here (instance = this port - 3300)")
+	}
+	fmt.Println("answers: Z_DOUBLE, Z_GREET, STFC_CONNECTION, RFC_PING — anything else raises FU_NOT_FOUND")
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
 		fmt.Printf("client %s\n", conn.RemoteAddr())
-		go rfcserver.ServeTypeT(conn, d, func(s string) { fmt.Println("  " + s) }, dump)
+		go serve(conn, d, func(s string) { fmt.Println("  " + s) }, dump)
 	}
 }
