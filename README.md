@@ -29,33 +29,10 @@ serializer writes it. We took it off the wire — see
 > to the client leg today. → [`serializer-selection.md`](docs/discoveries/serializer-selection.md)
 > · [role state machines](docs/role-state-machines.md)
 
-> ## 🎉 Call any SAP function module — from Go, the shell, or as MCP tools
->
-> **2026-08-20 — the client now calls essentially any FM, and an MCP server turns
-> a live SAP system into tools an AI can use.** Every scalar type (incl.
-> STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP, FLOAT, UTCLONG), flat **and
-> deep** structures & tables (STRING/XSTRING via xRFC), and both **classic and
-> fast** serialization on decode — all round-tripped live against A4H, pure Go.
-> On top of that: `orfc describe <FM>` renders any function module as an **MCP-tool
-> JSON Schema**, `orfc call` runs any FM from plain JSON, and **`orfc mcp`
-> auto-exposes a curated set of FMs as real MCP tools** — point it at your SAP and
-> an assistant can call RFC directly. Zero SAP libraries.
-
-> ## 🎉 Both directions are live against real SAP — with zero SAP libraries
->
-> **2026-08-19 — open-rfc-go now speaks classic RFC _as the server_, not only the client.**
-> A live SAP system (A4H) ran a real ABAP program of six parametrized calls and
-> **open-rfc-go answered every one, `rc=0`**, as the server:
->
-> | `RFC_PING` | `RFC_SYSTEM_INFO` | `STFC_CONNECTION` | `STFC_STRUCTURE` | `RFC_READ_TABLE` | `STFC_STRING` |
-> |---|---|---|---|---|---|
-> | rc=0 | rc=0 · A4H | rc=0 · echo + callback | rc=0 · struct+table | rc=0 · 17×2 | rc=0 |
->
-> A single Go endpoint answers **every SM59 test button green** — Connection Test,
-> Unicode Test, Fast Serialization Test — across three serialization modes. And
-> open-rfc-go now **decodes S/4HANA classic responses end to end** — scalars and
-> tables alike (real T000 rows, field lists, structures) — pure Go. The **client**
-> leg is live-proven too. → the wire story: [`docs/discoveries/0001`](docs/discoveries/0001-live-type3-server.md)
+> **Before that** — 
+> [**2026-08-20** · call any function module, and expose it to an assistant as MCP tools](BANNERS.md#2026-08-20-call-any-sap-function-module-from-go-the-shell-or-as-mcp-tools) · 
+> [**2026-08-19** · both directions live against real SAP, zero SAP libraries](BANNERS.md#2026-08-19-both-directions-live-against-real-sap-with-zero-sap-libraries) · 
+> every headline this project has run: [`BANNERS.md`](BANNERS.md)
 
 > ⚠️ **Research preview — `v0.1.0`.** A tagged preview, not a stable API: `0.x`
 > means it may move under you, and there is no support boundary. Classic
@@ -64,7 +41,122 @@ serializer writes it. We took it off the wire — see
 
 ## What you can do now
 
-**Call an ABAP function module** (pure Go, native values in and out):
+### Hand a live SAP system to an assistant — `orfc mcp`
+
+The bridge is one binary and one line of config. `orfc mcp` speaks the Model
+Context Protocol over stdio, and every function module you admit becomes a real
+tool, its `inputSchema` generated from the module's own interface:
+
+```sh
+orfc mcp --read-only --expose 'STFC_*' --hide '*_BACK,*_TCPIC,*_SAPGUI'
+```
+
+**A green list you wrote beats a red list you hoped was complete.** That command,
+run against a live A4H, admits exactly this — 18 `STFC_*` modules exist, the red
+list removes four, and `--read-only` withholds the generic `call` that would
+otherwise be a way around the whole arrangement:
+
+```
+generic:  rfc_info  rfc_ping  rfc_describe  rfc_search  rfc_read_table
+          (rfc_call appears only without --read-only)
+
+per-FM :  STFC_STRING          STFC_XSTRING         STFC_DEEP_STRUCTURE
+          STFC_DEEP_TABLE      STFC_EXCEPTION       STFC_CHANGING
+          STFC_CHANGING_TABLE  STFC_CONNECTION      STFC_PERFORMANCE
+          STFC_STRUCTURE       STFC_TX_TEST         STFC_RETURN_DATA
+          STFC_RETURN_DATA_INTERFACE               STFC_START_CONNECT_REG_SERVER
+
+withheld by the red list:
+          STFC_CONNECTION_BACK  STFC_WRITE_TO_TCPIC  STFC_QRFC_TCPIC  STFC_SAPGUI
+```
+
+| flag | effect |
+|---|---|
+| `--read-only` | no writes at all — and no generic `rfc_call` |
+| `--safe` | blocks modules whose names read as mutating, and `BAPI_TRANSACTION_COMMIT` |
+| `--allow-commit` | permits that commit again inside `--safe`, when you mean it |
+| `--expose 'MASK,…'` | green list — only matching modules become tools |
+| `--hide 'MASK,…'` | red list, subtracted from the green list |
+| `--max N` | cap how many tools are generated |
+
+Wiring it into Claude Code, Codex or any MCP client is a `.mcp.json` entry:
+
+```json
+{ "mcpServers": { "a4h": {
+    "command": "/abs/path/to/orfc",
+    "args": ["mcp", "--read-only", "--expose", "STFC_*"],
+    "env": { "SAP_ASHOST": "a4h.example", "SAP_SYSNR": "00",
+             "SAP_CLIENT": "001", "SAP_USER": "DEVELOPER", "SAP_PASSWORD": "…" }
+} } }
+```
+
+### The same thing from a shell — `orfc`
+
+One binary, two modes. Everything the assistant can do, you can do by hand:
+
+```sh
+export SAP_ASHOST=a4h.example SAP_SYSNR=00 SAP_CLIENT=001 \
+       SAP_USER=DEVELOPER SAP_PASSWORD='…'      # or a .rfc.json system
+
+orfc ping
+orfc info                                        # RFC_SYSTEM_INFO
+orfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'    # any FM, from plain JSON
+orfc describe STFC_STRUCTURE                     # the interface, as a JSON Schema
+orfc search 'BAPI_USER_*'                        # what is RFC-enabled here
+orfc read-table T000 --top 5
+```
+
+`orfc info` against a stock A4H answers with the system talking about itself:
+
+```json
+{
+  "RFCSYSID":  "A4H",      "RFCSAPRL":   "758",       "RFCKERNRL": "793",
+  "RFCHOST":   "vhcala4h", "RFCDBSYS":   "HDB",       "RFCOPSYS":  "Linux",
+  "RFCCHARTYP":"4103",     "RFCINTTYP":  "LIT",       "RFCPROTO":  "011"
+}
+```
+
+`4103` is the code page (UTF-16LE), `LIT` little-endian, `011` the RFC protocol
+version — the three fields every decoder in this repository has to agree with.
+
+Full setup, and the errors you will actually hit:
+[**`docs/quickstart-a4h.md`**](docs/quickstart-a4h.md).
+
+### See the protocol — `orfc-lab`, `orfc-viewer`
+
+`orfc-lab` runs a transparent sniffer and a generating ("conscious") server
+together; point SM59 type-3 destinations at this box, then
+decode captures offline with `orfc-viewer`:
+
+```sh
+go run ./cmd/orfc-lab -target-host <your-real-sap-host>
+#   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
+#   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
+go run ./cmd/orfc-viewer cap-lab.jsonl                # decoded text transcript (values redacted)
+go run ./cmd/orfc-viewer -html cap-lab.jsonl         # writes cap-lab.html — a self-contained visual inspector
+go run ./cmd/orfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhost:8080 (refresh reloads a growing dump)
+```
+
+`orfc-viewer` is offline — it reads a capture file, never a live SAP system;
+`-values` includes decoded scalar/table values (may reveal credentials/data).
+
+### Answer the calls yourself — `orfc-srv`
+
+`orfc-srv` is the server front door, in either role a destination can address.
+Point an SM59 destination at it and every `CALL FUNCTION … DESTINATION` lands in
+the dispatcher — which is how you exercise a Z function module against this
+implementation without a second SAP system:
+
+```sh
+go run ./cmd/orfc-srv -mode typet -listen :3300     # registered server (SM59 type T)
+go run ./cmd/orfc-srv -mode type3 -listen :3313     # an ABAP system    (SM59 type 3)
+# answers Z_DOUBLE, Z_GREET, STFC_CONNECTION, RFC_PING; anything else raises FU_NOT_FOUND
+```
+
+### Use it as a library
+
+Native Go values in and out, an FM interface resolved and cached for you, and an
+ABAP-side failure returned as a typed error:
 
 ```go
 ctx := context.Background()
@@ -80,23 +172,15 @@ var ex *rfc.ABAPException
 if errors.As(err, &ex) { /* typed ABAP-side failure */ }
 ```
 
-**Drive RFC from the shell or an AI** — `rfc` is the client: a CLI, and (as
-`orfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
-or flags:
+The public surface is deliberately small, and it is not hypothetical: it is what
+[vibing-steampunk](https://github.com/oisee/vibing-steampunk) builds its RFC leg
+on — `vsp rfc` and `vsp rfc debug` are this package, and the ABAP debugger below
+is driven through it. A library that one real tool depends on is a library that
+has had its corners knocked off.
 
-```sh
-export SAP_ASHOST=sap.example SAP_USER=DEVELOPER SAP_PASSWORD=…   # or a .rfc.json system
+### Debug ABAP over RFC
 
-go run ./cmd/orfc info                                  # system info
-go run ./cmd/orfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
-go run ./cmd/orfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
-go run ./cmd/orfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
-
-# MCP server (stdio, like `vsp mcp`): every matching FM becomes a tool an assistant can call
-go run ./cmd/orfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
-```
-
-**Debug ABAP over RFC** — a pinned conversation is a stable ABAP session, which
+A pinned conversation is a stable ABAP session, which
 is exactly what the debugger needs: `attach_debuggee( )` hands back an object
 reference and every later operation hangs off it. So `Client.Pin` plus a thin
 ABAP facade gives real breakpoints, attach, and stepping — no SAP GUI, no
@@ -157,33 +241,6 @@ was one an HTTP client could not even lock (`MODIFICATION_SUPPORT=NoModification
 which is SAP saying "no modification assistant needed", not "read-only"). So
 writing ABAP over RFC is not merely equivalent to writing over HTTP — on that
 system it is strictly more capable.
-
-**Answer real calls** — `orfc-srv` is the server front door, in either role a
-destination can address. Point an SM59 destination at it and every
-`CALL FUNCTION … DESTINATION` lands in the dispatcher — which is how you test a
-Z function module against our implementation without a second SAP system:
-
-```sh
-go run ./cmd/orfc-srv -mode typet -listen :3300     # registered server (SM59 type T)
-go run ./cmd/orfc-srv -mode type3 -listen :3313     # an ABAP system    (SM59 type 3)
-# answers Z_DOUBLE, Z_GREET, STFC_CONNECTION, RFC_PING; anything else raises FU_NOT_FOUND
-```
-
-**Sniff & emulate** — `orfc-lab` runs a transparent sniffer and a generating
-("conscious") server together; point SM59 type-3 destinations at this box, then
-decode captures offline with `orfc-viewer`:
-
-```sh
-go run ./cmd/orfc-lab -target-host <your-real-sap-host>
-#   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
-#   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
-go run ./cmd/orfc-viewer cap-lab.jsonl                # decoded text transcript (values redacted)
-go run ./cmd/orfc-viewer -html cap-lab.jsonl         # writes cap-lab.html — a self-contained visual inspector
-go run ./cmd/orfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhost:8080 (refresh reloads a growing dump)
-```
-
-`orfc-viewer` is offline — it reads a capture file, never a live SAP system;
-`-values` includes decoded scalar/table values (may reveal credentials/data).
 
 ## Status
 
