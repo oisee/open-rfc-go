@@ -39,9 +39,6 @@ func mustHexTC(s string) []byte {
 	return b
 }
 
-// niPongTC is the 8-byte NI keepalive reply ("NI_PONG\\0").
-var niPongTC = []byte("NI_PONG\x00")
-
 // frameFn returns the APPC function-code byte for logging, or 0 for a short frame.
 func frameFn(b []byte) byte {
 	if len(b) > 1 {

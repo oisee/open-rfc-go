@@ -6,6 +6,7 @@
 | [Protocol primer](protocol-primer.md) | What classic RFC does on the wire, layer by layer |
 | [Glossary](glossary.md) | What NI, APPC, CPIC, xRFC, LUW, `sysnr` mean |
 | [Architecture](architecture.md) | Why the code is shaped this way; ownership invariants |
+| [Role state machines](role-state-machines.md) | Who may send what, when — client and each server role, and the keepalive rule |
 | [Recurring bug class](recurring-bug-class.md) | The mistake to avoid — **required before touching a decoder** |
 | [Development](development.md) | How to build, test, fuzz, and run one test |
 | [Live test plan](live-test-plan.md) | You have a real SAP system and want to verify against it |

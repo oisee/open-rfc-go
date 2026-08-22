@@ -59,16 +59,16 @@ func ServeTypeT(conn net.Conn, d *Dispatcher, logf func(string), dump func(dir s
 			dump("C->S", got)
 		}
 		switch {
-		case len(got) == 64 && got[0] == 0x02 && got[1] == 0x03: // NI route hello
+		case IsNIRouteHello(got): // NI route hello
 			if send(typeTHelloAck(got)) != nil {
 				return
 			}
 			log("CONNECT: NI hello acknowledged")
 
-		case len(got) == 8 && string(got) == "NI_PING\x00": // keepalive
+		case Classify(got) == FrameNIPing: // keepalive
 			// The client pings after the ALLOCATE accept and blocks until it sees
 			// the pong; without it the conversation never reaches the call CUT.
-			if send(niPongTC) != nil {
+			if send(NIPong) != nil {
 				return
 			}
 			log("NI_PING -> NI_PONG")

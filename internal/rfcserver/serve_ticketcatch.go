@@ -56,7 +56,7 @@ func ServeTicketCatch(conn net.Conn, logf func(string), dump func(dir string, fr
 			dump("C->S", got)
 		}
 		switch {
-		case len(got) == 64: // gateway record
+		case Classify(got) == FrameGatewayRecord: // gateway record
 			reply := append([]byte(nil), got...)
 			reply[gatewayAckOffset1] = gatewayAckLevel
 			reply[gatewayAckOffset2] = gatewayAckCaps
@@ -81,8 +81,8 @@ func ServeTicketCatch(conn net.Conn, logf func(string), dump func(dir string, fr
 				return
 			}
 
-		case len(got) == 8 && string(got) == "NI_PING\x00": // keepalive
-			if send(niPongTC) != nil {
+		case Classify(got) == FrameNIPing: // keepalive
+			if send(NIPong) != nil {
 				return
 			}
 			log("NI_PING -> NI_PONG (holding the conversation open for the logon)")
