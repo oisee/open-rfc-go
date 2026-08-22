@@ -220,53 +220,92 @@ We do **not** already own the decompressor. The classic path's "simple
 compression" (`decodeSimpleCompressedTableRow`) expands a short row by repeating
 its last byte — trailing-run fill, unrelated to the back-referencing scheme here.
 
-### The type metadata, half solved
+### The type metadata — solved, and an earlier reading here was wrong
 
-A probe function module carrying one parameter per declared type and width
-(`Z_FS_TYPES`), called with **one parameter at a time** — sending them all at
-once pushes the payload past 512 bytes, where it is compressed and the very
-records we are reading disappear.
-
-The metadata between a field's type and its value is a record of its own:
+A parameter is announced by a header, a descriptor, and one description per field:
 
 ```
-0x06 <len:2 LE>   <namelen:1> NAME   <value record>   'E'
+0x44 'D' <fieldcount:1>
+0x50 'P' <len:1> "\TYPE=<name>"
+repeated fieldcount times:
+    <typecode:1> [<width:2 LE>] <namelen:1> <NAME>
 ```
 
-The length counts UTF-16 units. The field name after it carries **no tag**, only
-a length byte, which is why scanning for records never found it — it is reachable
-only because the `0x06` record anchors the position.
+The bytes that sat between a type and its name are **one family: single-byte ABAP
+type codes.** Observed: `0x01` INT1, `0x02` INT2, `0x03` INT4, `0x06` CHAR,
+`0x0c` DATS, `0x0e` TIMS, `0x13` FLTP, `0x17` RAW, `0x18` STRING, `0x19` XSTRING.
+A width-parameterised code carries a two-byte operand; one whose width follows
+from the code does not.
 
-Fixed-width tags carry no such record at all. `INT4` reads
-`'P' "\TYPE=I" 0x03 "TABLE_LINE" 'N' d12f0100 'E'` — 77777, little-endian, and
-the width comes from the tag.
+**`0x03` is not a name tag.** It was read as one here because it sat before the
+field name in every `INT4` capture. It is the type code for INT4, in the same slot
+as `0x01` for INT1 and `0x02` for INT2, exactly where DDIC says those fields are.
 
-**What the length is the length *of* is not settled**, and the captures disagree
-flatly:
+The field count is a checksum, and a strong one: over 434 descriptors the
+recovered list length equals it exactly, with all 89 mismatches in frames above
+512 bytes — that is, in compressed frames — and none below.
 
-| parameter declared | value sent | `0x06` record |
-|---|---|---|
-| `CHAR50` | `"ABCDE"` | **10** |
-| `CHAR210` | `"ABCDE"` | **10** |
-| `CHAR30` | `"ABCD"` | **60** |
+#### The width operand, and why it looked contradictory
 
-The first two rule out "declared width" by themselves: the same five-character
-literal in fields declared 50 and 210 wide produces a **byte-identical** record,
-where a width would give 100 and 420. The third rules out "value length" just as
-firmly — four characters would be 8, not 60.
+It is the declared width of the type **the descriptor names**, in bytes, UTF-16
+counted. The apparent contradiction came from not noticing what the descriptor
+actually said:
 
-Something else varies between those calls and has not been isolated. Both
-readings are recorded and neither is implemented as a rule; the decoder requires
-only that the declared length is not *smaller* than twice the value's bytes,
-which is the strongest check that does not contradict a real capture.
+```
+\TYPE=CHAR30                           06 3c 00 -> 60, whatever the value's length
+\TYPE=%_T00006S00000000O0000000298     06 0c 00 -> 12, and the value is "Claude"
+```
 
-This corrects an earlier note here. `0x06 0x3c 0x00` was first read as a width
-because 60 = 30 x 2 fit the `CHAR30` case — but that case had the caller filling
-the field exactly, which is what made a width and a value length indistinguishable.
+The second is a type the **serializer generated for that call**, sized to the
+value. So the width tracks the value there — not because the rule changed, but
+because the declaration did.
 
-Still not modelled: the `0x5001` container's nesting, and the bytes that sit in
-this position for the types that use a different tag there — `0x18` before a
-`STRING` field's name, `0x13 0x86 0x00` before `RFCTEST`'s.
+This is what invalidated an earlier probe here. Passing the same literal to
+parameters declared `CHAR50` and `CHAR210` produced byte-identical frames, which
+was taken as proof the width could not be the declared one. In fact **neither
+declaration ever reached the wire**: both calls carried
+`\TYPE=%_T00006S00000000O0000000297`, so both really did serialise the same
+five-character type. The literals `CHAR50` and `CHAR210` appear in no frame of any
+capture. The differential varied something the serializer had already erased —
+a controlled experiment on an uncontrolled variable.
+
+The lesson generalises: **read the descriptor before trusting what the ABAP source
+says a parameter is.**
+
+### The item grammar — what `0x5001` really is
+
+Not a bespoke container. One item of a general transport-layer grammar:
+
+```
+<id:2 BE> <len:2 BE> <data:len> <id:2 BE>
+```
+
+The identifier repeats after the data as a closing tag. `0x5001` is the id of the
+item carrying a serialized parameter block; `0x0130` carries the ABAP program
+name.
+
+The closing tag is also the explanation for a long-standing puzzle. Searching a
+frame for `0x5001` finds every item **twice**, once opening and once closing, and
+reading a closing tag as an opening one takes the *next item's id* for a length.
+That is exactly the "second occurrence gives a length that runs past the end of
+the frame" that stalled an earlier pass: the unexplained 304 was `0x0130`, the id
+that followed.
+
+### The compression is LZ4
+
+Not merely LZ77-shaped — the **standard LZ4 block format**: nibble token,
+255-chains on both run lengths, two-byte little-endian match offset, four-byte
+minimum match, final sequence literals-only.
+
+Established by decoding rather than by inspection. A strict decoder written to the
+published block format reproduces every compressed block across three captures,
+each consuming exactly the declared compressed byte count and emitting exactly the
+declared uncompressed one. There is no LZ4 frame header, no magic and no checksum;
+the surrounding framing supplies both sizes.
+
+`internal/fastser.DecompressBlock` implements it, so payloads above the 512-byte
+threshold are now readable. This supersedes the note that decompression would be a
+substantial separate project: the block format is small and published.
 
 ### The resynchronisation trap
 
