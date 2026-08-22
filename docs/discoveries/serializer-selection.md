@@ -220,13 +220,55 @@ We do **not** already own the decompressor. The classic path's "simple
 compression" (`decodeSimpleCompressedTableRow`) expands a short row by repeating
 its last byte — trailing-run fill, unrelated to the back-referencing scheme here.
 
-### What is not modelled, and why it is left alone
+### The type metadata, half solved
 
-The bytes between a `\TYPE=` descriptor and the field name are type metadata of a
-shape we have not pinned down: `03` for `I`, `18` for `STRING`, `06 3c 00` for
-`CHAR30`, `13 86 00` for `RFCTEST`. Reading the last two as a little-endian width
-fits `CHAR30` at 60 = 30x2 and does **not** fit `RFCTEST`, so it is recorded here
-and not implemented.
+A probe function module carrying one parameter per declared type and width
+(`Z_FS_TYPES`), called with **one parameter at a time** — sending them all at
+once pushes the payload past 512 bytes, where it is compressed and the very
+records we are reading disappear.
+
+The metadata between a field's type and its value is a record of its own:
+
+```
+0x06 <len:2 LE>   <namelen:1> NAME   <value record>   'E'
+```
+
+The length counts UTF-16 units. The field name after it carries **no tag**, only
+a length byte, which is why scanning for records never found it — it is reachable
+only because the `0x06` record anchors the position.
+
+Fixed-width tags carry no such record at all. `INT4` reads
+`'P' "\TYPE=I" 0x03 "TABLE_LINE" 'N' d12f0100 'E'` — 77777, little-endian, and
+the width comes from the tag.
+
+**What the length is the length *of* is not settled**, and the captures disagree
+flatly:
+
+| parameter declared | value sent | `0x06` record |
+|---|---|---|
+| `CHAR50` | `"ABCDE"` | **10** |
+| `CHAR210` | `"ABCDE"` | **10** |
+| `CHAR30` | `"ABCD"` | **60** |
+
+The first two rule out "declared width" by themselves: the same five-character
+literal in fields declared 50 and 210 wide produces a **byte-identical** record,
+where a width would give 100 and 420. The third rules out "value length" just as
+firmly — four characters would be 8, not 60.
+
+Something else varies between those calls and has not been isolated. Both
+readings are recorded and neither is implemented as a rule; the decoder requires
+only that the declared length is not *smaller* than twice the value's bytes,
+which is the strongest check that does not contradict a real capture.
+
+This corrects an earlier note here. `0x06 0x3c 0x00` was first read as a width
+because 60 = 30 x 2 fit the `CHAR30` case — but that case had the caller filling
+the field exactly, which is what made a width and a value length indistinguishable.
+
+Still not modelled: the `0x5001` container's nesting, and the bytes that sit in
+this position for the types that use a different tag there — `0x18` before a
+`STRING` field's name, `0x13 0x86 0x00` before `RFCTEST`'s.
+
+### The resynchronisation trap
 
 One negative result is worth keeping, because it is a trap. Recovering from an
 unmodelled region by stepping one byte at a time does not work here: the tags are
@@ -240,7 +282,9 @@ record must have its flag byte, an integer must be followed by the end marker.
 
 The `0x5001` container's nesting is also still open.
 
-Its version is negotiated in the clear. SM59's *Fast Serialization Test* button
+### The version handshake
+
+The serializer's version is negotiated in the clear. SM59's *Fast Serialization Test* button
 queries three names and the answer carries the value:
 
 ```
