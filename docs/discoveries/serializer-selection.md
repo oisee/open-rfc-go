@@ -158,3 +158,36 @@ so a capture is self-labelling whichever serializer is in force.
   delta manager has nothing to elide unless the *same* table crosses the wire more
   than once on one connection. The driver sends each table once, so the mechanism
   has not yet been given anything to do.
+
+## What the delta manager means for our server — decode and encode are not symmetric
+
+Reading a delta and writing one are different obligations, and conflating them is
+what made the delta manager look like a blocker for the server track.
+
+**Decoding, we have no choice.** A peer may send a real delta, so a client has to
+understand the general form. That is a decoder problem, and decoding is the side we
+already do well.
+
+**Encoding, we have every choice.** Nothing requires a server to produce an
+*efficient* delta. A delta encoding always has a degenerate form — "here is the
+whole table" — because that is what the mechanism must emit the first time a table
+crosses a connection, when there is nothing to diff against. So a deliberately
+dumb server can always answer with the full table and remain correct. It costs
+bandwidth and nothing else.
+
+This matters more than it sounds, because of where the evidence comes from: the
+first transmission of any table in our captures **is** that degenerate form. We do
+not need to observe, understand, or reproduce a real delta in order to write the
+encoder — we already hold worked examples of exactly the bytes we would emit.
+
+So the delta manager comes off the critical path for the server:
+
+- it is a decode requirement, handled where decoding is handled;
+- it is *not* an encode requirement, because the trivial encoding is legal;
+- and the client-side flag that disables it (`0x01` in the mask) is set on the
+  *caller's* destination, so we cannot depend on it being off — which is precisely
+  why the degenerate-encoding argument is the one that carries.
+
+The same reasoning applies to any negotiated efficiency feature we meet later:
+implement the decoder for the general case, emit the simplest legal form, and
+optimise only if something actually requires it.
