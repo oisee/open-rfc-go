@@ -1,8 +1,33 @@
-# open-rfc-go
+<img src="docs/assets/logo.svg" alt="open-rfc-go" width="640">
+
+```
+ ─┬──┬────────┬──┬──────────┬──┬──────────┬──┬─
+  │06│  CPIC  │cb│ \TYPE=I  │4e│ 15000000 │45│
+ ─┴──┴────────┴──┴──────────┴──┴──────────┴──┴─
+```
 
 A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 **and** server. No NW RFC SDK, no native library, no cgo. A Go port of
 [`open-rfc`](https://github.com/marianfoo/open-rfc).
+
+*(That frame above is real: an `INT4` parameter carrying 21, as the fast
+serializer writes it. We took it off the wire — see
+[serializer selection](docs/discoveries/serializer-selection.md).)*
+
+> ## 🔬 The serializers, mapped — and the fast one decoded
+>
+> **2026-08-22 — we can now select any of SAP's four serializers on demand and
+> read what each puts on the wire.** The destination has two independent knobs and
+> the second overrides the first, which is why a destination can read *"Fast
+> serializer"* while storing something else entirely. With that settled, a
+> controlled differential — vary one parameter, hold the rest, capture both ends —
+> gave the **fast serializer's record grammar**: tag-dependent framing, `INT4`
+> little-endian and fixed-width, `char`/`STRING`/`XSTRING` at **one byte per unit**
+> (not UTF-16, not padded), and the version handshake negotiating `FAST_SER_VERS = 3`.
+> Payloads above **512 bytes are compressed** — intrinsic to that serializer, not a
+> switchable transport feature. Our client negotiates classic, so none of it applies
+> to the client leg today. → [`serializer-selection.md`](docs/discoveries/serializer-selection.md)
+> · [role state machines](docs/role-state-machines.md)
 
 > ## 🎉 Call any SAP function module — from Go, the shell, or as MCP tools
 >
@@ -11,8 +36,8 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 > STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP, FLOAT, UTCLONG), flat **and
 > deep** structures & tables (STRING/XSTRING via xRFC), and both **classic and
 > fast** serialization on decode — all round-tripped live against A4H, pure Go.
-> On top of that: `rfc describe <FM>` renders any function module as an **MCP-tool
-> JSON Schema**, `rfc call` runs any FM from plain JSON, and **`rfc-mcp`
+> On top of that: `saprfc describe <FM>` renders any function module as an **MCP-tool
+> JSON Schema**, `saprfc call` runs any FM from plain JSON, and **`saprfc mcp`
 > auto-exposes a curated set of FMs as real MCP tools** — point it at your SAP and
 > an assistant can call RFC directly. Zero SAP libraries.
 
@@ -32,7 +57,8 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 > tables alike (real T000 rows, field lists, structures) — pure Go. The **client**
 > leg is live-proven too. → the wire story: [`docs/discoveries/0001`](docs/discoveries/0001-live-type3-server.md)
 
-> ⚠️ **Research preview.** No release, no stable API, no support boundary. Classic
+> ⚠️ **Research preview — `v0.1.0`.** A tagged preview, not a stable API: `0.x`
+> means it may move under you, and there is no support boundary. Classic
 > RFC has no transport encryption — don't send credentials across an untrusted
 > network ([`SECURITY.md`](SECURITY.md)). Don't depend on it yet.
 
@@ -55,19 +81,19 @@ if errors.As(err, &ex) { /* typed ABAP-side failure */ }
 ```
 
 **Drive RFC from the shell or an AI** — `rfc` is the client: a CLI, and (as
-`rfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
+`saprfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
 or flags:
 
 ```sh
 export SAP_ASHOST=sap.example SAP_USER=DEVELOPER SAP_PASSWORD=…   # or a .rfc.json system
 
-go run ./cmd/rfc info                                  # system info
-go run ./cmd/rfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
-go run ./cmd/rfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
-go run ./cmd/rfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
+go run ./cmd/saprfc info                                  # system info
+go run ./cmd/saprfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
+go run ./cmd/saprfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
+go run ./cmd/saprfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
 
 # MCP server (stdio, like `vsp mcp`): every matching FM becomes a tool an assistant can call
-go run ./cmd/rfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
+go run ./cmd/saprfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
 ```
 
 **Debug ABAP over RFC** — a pinned conversation is a stable ABAP session, which
@@ -155,10 +181,11 @@ go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhos
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Tooling** | live: an `rfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`rfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
+| **Tooling** | live: a `saprfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`saprfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
 | **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`) — **including SAP's own ADT debugger resources, with nothing installed on the server**: listen, attach, step, stack, live-verified against A4H |
 | **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
-| **Next** | per-FM `outputSchema` + HTTP transport for `rfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
+| **Serialization** | all four modes selectable on demand; the fast serializer's record grammar decoded (tags, widths, the 512-byte compression threshold) — decoded, not yet produced |
+| **Next** | per-FM `outputSchema` + HTTP transport for `saprfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 
@@ -166,12 +193,63 @@ Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md
 
 | Document | For |
 |---|---|
+| [**Quickstart — against an A4H system**](docs/quickstart-a4h.md) | **start here**: ports, a user that works, first calls, MCP config, access lists, what goes wrong |
 | [**About** — what it is & how it's built](docs/about.md) | rationale, porting discipline, scope, cross-language hazards |
 | [Discoveries 0001 — live type-3 server](docs/discoveries/0001-live-type3-server.md) | the whole server wire journey |
 | [Cheat sheet](docs/cheatsheet.md) | ports, auth, constants, commands — one page |
 | [Docs index](docs/README.md) | everything else (primer, glossary, architecture, dev) |
 | [Porting plan](docs/porting-plan.md) | what's next and why in that order |
+| [Serializer selection](docs/discoveries/serializer-selection.md) | how the serializer is chosen and what each one puts on the wire |
+| [Role state machines](docs/role-state-machines.md) | who may send what, when — and the keepalive rule |
 | [Roadmap](docs/roadmap.md) | ranked plan — what's done, the tool surface, callbacks, and later bets |
+
+## How this differs from `open-rfc`
+
+`open-rfc` is the TypeScript original, and it is the reason this exists: it
+established that classic RFC can be spoken without SAP's SDK, and it did the
+hard, unglamorous work of getting the framing right. Roughly a third of this
+repository is a line-by-line port of it, recorded file by file in
+[`docs/provenance.md`](docs/provenance.md) as Apache-2.0 §4(b) requires.
+
+**Ported from `open-rfc`** — NI framing, the checked byte reader/writer, RFCPRO
+field headers, the gateway record, APPC records and fragmentation, the password
+scramble (bit-exact, verified against a frozen SHA-256 over 21,592 vectors), the
+RFC error envelope, and the CPIC layer with its bounded initial-logon grammar.
+
+**Written here, clean-room from our own captures** — the fast serialization
+codec, the entire server side (seven roles, from replay to a dispatching
+"conscious" server), xRFC and the recursive metadata graph, server→client
+callbacks, pinned sessions, the ABAP debugger over RFC, and the ADT tunnel.
+
+**What the translation changed, deliberately:**
+
+| `open-rfc` | here |
+|---|---|
+| thrown `RangeError`/`Error` | returned, wrapped sentinel errors (`errors.Is`/`As`) |
+| Promise/AbortSignal orchestration | a blocking transport plus `context.Context` |
+| an `RfcFailure` taxonomy | one documented error tree on the public `rfc` package |
+| runtime type guards | Go's fixed-width parameter types, checked at compile time |
+| typed-array geometry intrinsics | dropped — that attack class does not exist in Go |
+| `#private` fields, `WeakMap` side tables | unexported fields |
+
+Two things follow from being a port rather than a rewrite. Behaviour is **not**
+guaranteed to match `open-rfc` — where the wire forced a choice we made our own,
+and said so in the file. And upstream fixes are propagatable: the provenance
+table names the Go file for every upstream file, and records the commit it was
+taken at, so `git log 847036d..origin/main -- <upstream file>` says what drifted.
+
+## Acknowledgements
+
+**[Marian Zeis](https://github.com/marianfoo)** wrote
+[`open-rfc`](https://github.com/marianfoo/open-rfc), and this project would not
+exist without it. Reimplementing a protocol with no public specification is
+mostly a matter of knowing which byte matters, and that knowledge is expensive.
+`open-rfc` published it under Apache-2.0 and made everything downstream possible
+— including this port, and the SAP-SDK-free tooling built on top of it.
+
+Where we went further, it was from a position `open-rfc` established. Where we
+differ, it is not a criticism. `open-rfc`'s maintainers do not support this port
+and are not responsible for it.
 
 ## Licensing
 

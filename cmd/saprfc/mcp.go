@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// rfc-mcp is a Model Context Protocol server over stdio that exposes the SDK-free
+// saprfc mcp is a Model Context Protocol server over stdio that exposes the SDK-free
 // RFC client as a small set of generic tools: rfc_info, rfc_ping, rfc_describe,
 // rfc_search, rfc_read_table, and rfc_call. `rfc_describe` returns an FM interface
 // as an MCP-tool JSON Schema; `rfc_call` runs any function module with native

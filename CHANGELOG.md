@@ -5,6 +5,66 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 [`docs/discoveries/`](docs/discoveries/); the porting plan is in
 [`docs/porting-plan.md`](docs/porting-plan.md).
 
+## v0.1.0 — first tagged preview — 2026-08-22
+
+The first version with a name and a number. Still a research preview: `0.x` means
+the API may move, and classic RFC still has no transport encryption.
+
+**The shipped binary is `saprfc`** (was `cmd/rfc`). It is both the CLI and, as
+`saprfc mcp`, the MCP server — one binary, two modes, like `vsp`. The name was
+chosen so it says what it speaks and does not collide with the IETF sense of
+"rfc" on someone's `PATH`; the lab tools keep their `rfc-*` names because they
+are development tools, not something you install.
+
+Getting it running against a system is now written down:
+[`docs/quickstart-a4h.md`](docs/quickstart-a4h.md).
+
+### Serialization, mapped end to end
+
+All four of SAP's serializers can be selected on demand, and what each puts on
+the wire is recorded. The controlling fact was not where anyone expected: the
+destination has **two** independent knobs and the second overrides the first,
+which is why a destination can display *"Fast serializer"* while storing a value
+that means something else. Details in
+[`docs/discoveries/serializer-selection.md`](docs/discoveries/serializer-selection.md).
+
+With that settled, a controlled differential — vary one parameter, hold the rest,
+capture both ends — produced the **fast serializer's record grammar**:
+
+- framing is **tag-dependent**; there is no single length rule
+- `INT4` is little-endian and fixed-width; `char`, `STRING` and `XSTRING` cost
+  **one byte per unit** — not UTF-16, and not padded to the declared width
+- the version handshake is deterministic and negotiates `FAST_SER_VERS = 3`
+- payloads above **512 bytes are compressed**, and that is intrinsic to the
+  serializer rather than a switchable transport feature
+
+Decoded, not produced. The client negotiates classic, so none of the fast
+serializer's compression has ever applied to the client leg.
+
+### Roles, written down
+
+[`docs/role-state-machines.md`](docs/role-state-machines.md) records who may send
+what and when: the client setup machine's transitions with the wire rule behind
+each invariant, all seven server roles and where each gets its replies, both
+handshake shapes, and the keepalive rule — answer every ping, never answer a
+pong, never parse an eight-byte frame as a record. Forgetting it stalls a
+conversation rather than failing it, which reads like a decode bug and is not one.
+
+Internally the roles now share one frame classifier. The eight keepalive bytes
+had been declared twice under different names, which is exactly how one role gets
+a fix the others miss.
+
+### Also in this release
+
+- `internal/fastser` decodes the record grammar: type descriptors, field names,
+  `char`, `INT4`, `STRING`, and the end marker, with a coverage count so "how
+  much of this do we actually model" is answerable rather than assumed
+- the delta manager is understood: it elides on the **response** side, and its
+  degenerate full-table form is what a server may always emit — so it never
+  blocked the server track
+- classic is complete for the synchronous path, re-verified live: scalar
+  `STRING` and `XSTRING`, and deep structures carrying both
+
 ## Client — ADT REST over classic RFC — 2026-08-21
 
 A real ADT REST request now travels through the classic-RFC tunnel:
