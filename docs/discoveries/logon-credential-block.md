@@ -19,7 +19,7 @@ Everything else is identical, field for field.
 Two things follow.
 
 **The user field is UTF-16.** `CLAUDE` is six characters and twelve bytes;
-`AVINOGRADOVA` is twelve and twenty-four. Our encoder writes ASCII there and the
+`LONGUSERNAME` is twelve and twenty-four. Our encoder writes ASCII there and the
 system has never complained, which says the field is tolerant, not that it is
 ASCII.
 

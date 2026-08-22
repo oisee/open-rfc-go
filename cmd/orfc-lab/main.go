@@ -34,10 +34,17 @@ import (
 )
 
 func main() {
-	targetHost := flag.String("target-host", "192.168.8.103", "real SAP host the sniffer forwards to")
+	targetHost := flag.String("target-host", "", "real SAP host the sniffer forwards to (required)")
 	dump := flag.String("dump", "cap-lab.jsonl", "capture file for the sniffer (tagged JSONL)")
 	dumpMax := flag.Int("dump-max", 0, "cap hex bytes per frame (0 = whole payload)")
 	flag.Parse()
+
+	// No default: a hostname baked in here would be somebody's real system, and
+	// silently forwarding a capture at the wrong host is worse than refusing.
+	if *targetHost == "" {
+		fmt.Fprintln(os.Stderr, "orfc-lab: -target-host is required (the SAP host the sniffer forwards to)")
+		os.Exit(2)
+	}
 
 	fmt.Fprintln(os.Stderr, "rfc-lab: captures can contain credentials — do not commit or share the dump file.")
 
