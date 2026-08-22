@@ -28,7 +28,7 @@ H=%%RFCSERVER%% G=localhost g=3388 N=VSP_TICKET_CATCH J=X n=A4H p=001 5=1100 7=6
 
 So `CALL FUNCTION ... DESTINATION 'ZSNIFF_TCP'` connects to gateway
 **localhost:3388** inside the container and asks for program `VSP_TICKET_CATCH`.
-Our impersonator (`cmd/rfc-typet`, `rfcserver.ServeTypeT`) listens there and
+Our impersonator (`cmd/orfc-srv`, `rfcserver.ServeTypeT`) listens there and
 plays gateway + registered server in one. `5=1100` / `7=6041` are the SM59
 Special-Options serializer/flag bits — see the fast-serializer note below.
 
@@ -163,8 +163,8 @@ lesson, and it is content-agnostic.)
 - `internal/rfcserver/serve_typet.go` — `ServeTypeT`: hello/ack, ALLOCATE accept
   built from the client's ALLOCATE (`typeTBuildAccept`), NI_PONG, CUT prefix
   finder (`indexCutRequest`), dispatch, reply.
-- `cmd/rfc-typet` — listener + a dispatcher with `Z_DOUBLE`, `Z_GREET`,
+- `cmd/orfc-srv` — listener + a dispatcher with `Z_DOUBLE`, `Z_GREET`,
   `STFC_CONNECTION` handlers; dumps every frame to JSONL.
 - Deploy: cross-compile `GOOS=linux GOARCH=amd64`, `docker cp` into `a4h-105`,
-  run on `127.0.0.1:3388`. The relay sniffer (`rfc-relaysniff` 3388->3300) is the
+  run on `127.0.0.1:3388`. The relay sniffer (`orfc-sniff` 3388->3300) is the
   positive-capture instrument for the same flow through the real gateway+rfcexec.

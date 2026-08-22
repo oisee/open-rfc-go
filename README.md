@@ -36,8 +36,8 @@ serializer writes it. We took it off the wire — see
 > STRING/XSTRING, DATE/TIME, packed DEC/TIMESTAMP, FLOAT, UTCLONG), flat **and
 > deep** structures & tables (STRING/XSTRING via xRFC), and both **classic and
 > fast** serialization on decode — all round-tripped live against A4H, pure Go.
-> On top of that: `saprfc describe <FM>` renders any function module as an **MCP-tool
-> JSON Schema**, `saprfc call` runs any FM from plain JSON, and **`saprfc mcp`
+> On top of that: `orfc describe <FM>` renders any function module as an **MCP-tool
+> JSON Schema**, `orfc call` runs any FM from plain JSON, and **`orfc mcp`
 > auto-exposes a curated set of FMs as real MCP tools** — point it at your SAP and
 > an assistant can call RFC directly. Zero SAP libraries.
 
@@ -81,19 +81,19 @@ if errors.As(err, &ex) { /* typed ABAP-side failure */ }
 ```
 
 **Drive RFC from the shell or an AI** — `rfc` is the client: a CLI, and (as
-`saprfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
+`orfc mcp`) an MCP server over the same library. Connection from `.rfc.json`, env,
 or flags:
 
 ```sh
 export SAP_ASHOST=sap.example SAP_USER=DEVELOPER SAP_PASSWORD=…   # or a .rfc.json system
 
-go run ./cmd/saprfc info                                  # system info
-go run ./cmd/saprfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
-go run ./cmd/saprfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
-go run ./cmd/saprfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
+go run ./cmd/orfc info                                  # system info
+go run ./cmd/orfc describe STFC_STRUCTURE               # FM interface as an MCP-tool JSON Schema
+go run ./cmd/orfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'   # call any FM with JSON
+go run ./cmd/orfc search 'BAPI_USER_*'                  # find RFC-enabled FMs
 
 # MCP server (stdio, like `vsp mcp`): every matching FM becomes a tool an assistant can call
-go run ./cmd/saprfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
+go run ./cmd/orfc mcp --expose 'BAPI_*,Z_*' --hide '*_DELETE,*_CREATE'
 ```
 
 **Debug ABAP over RFC** — a pinned conversation is a stable ABAP session, which
@@ -158,20 +158,31 @@ which is SAP saying "no modification assistant needed", not "read-only"). So
 writing ABAP over RFC is not merely equivalent to writing over HTTP — on that
 system it is strictly more capable.
 
-**Sniff & emulate** — `rfc-lab` runs a transparent sniffer and a generating
-("conscious") server together; point SM59 type-3 destinations at this box, then
-decode captures offline with `rfc-viewer`:
+**Answer real calls** — `orfc-srv` is the server front door, in either role a
+destination can address. Point an SM59 destination at it and every
+`CALL FUNCTION … DESTINATION` lands in the dispatcher — which is how you test a
+Z function module against our implementation without a second SAP system:
 
 ```sh
-go run ./cmd/rfc-lab -target-host <your-real-sap-host>
-#   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
-#   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
-go run ./cmd/rfc-viewer cap-lab.jsonl                # decoded text transcript (values redacted)
-go run ./cmd/rfc-viewer -html cap-lab.jsonl         # writes cap-lab.html — a self-contained visual inspector
-go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhost:8080 (refresh reloads a growing dump)
+go run ./cmd/orfc-srv -mode typet -listen :3300     # registered server (SM59 type T)
+go run ./cmd/orfc-srv -mode type3 -listen :3313     # an ABAP system    (SM59 type 3)
+# answers Z_DOUBLE, Z_GREET, STFC_CONNECTION, RFC_PING; anything else raises FU_NOT_FOUND
 ```
 
-`rfc-viewer` is offline — it reads a capture file, never a live SAP system;
+**Sniff & emulate** — `orfc-lab` runs a transparent sniffer and a generating
+("conscious") server together; point SM59 type-3 destinations at this box, then
+decode captures offline with `orfc-viewer`:
+
+```sh
+go run ./cmd/orfc-lab -target-host <your-real-sap-host>
+#   ports 3200/3300   sniffer → the real system, captures the wire (-dump cap-lab.jsonl)
+#   port  3313        conscious server (sys 13) — generates classic responses (Serializer=Classic)
+go run ./cmd/orfc-viewer cap-lab.jsonl                # decoded text transcript (values redacted)
+go run ./cmd/orfc-viewer -html cap-lab.jsonl         # writes cap-lab.html — a self-contained visual inspector
+go run ./cmd/orfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhost:8080 (refresh reloads a growing dump)
+```
+
+`orfc-viewer` is offline — it reads a capture file, never a live SAP system;
 `-values` includes decoded scalar/table values (may reveal credentials/data).
 
 ## Status
@@ -181,11 +192,11 @@ go run ./cmd/rfc-viewer -serve :8080 cap-lab.jsonl  # HTTP inspector at localhos
 | **Client** | live-proven against A4H — `rfc.Open` / `Client.Call`, metadata cache, typed ABAP errors. Scalars (incl. STRING/XSTRING, DATE/TIME, packed DEC, FLOAT), flat **and deep** structures & tables (STRING/XSTRING via xRFC), classic **and** fast-serialization responses |
 | **Server** | answers all SM59 test buttons + a real program (via captured, token-patched replies); a generating "conscious" server is WIP |
 | **Decode** | S/4HANA classic responses decode fully — scalars + tables (native & mixed) |
-| **Tooling** | live: a `saprfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`saprfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
+| **Tooling** | live: a `orfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`orfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
 | **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`) — **including SAP's own ADT debugger resources, with nothing installed on the server**: listen, attach, step, stack, live-verified against A4H |
 | **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
 | **Serialization** | all four modes selectable on demand; the fast serializer's record grammar decoded (tags, widths, the 512-byte compression threshold) — decoded, not yet produced |
-| **Next** | per-FM `outputSchema` + HTTP transport for `saprfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
+| **Next** | per-FM `outputSchema` + HTTP transport for `orfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
 

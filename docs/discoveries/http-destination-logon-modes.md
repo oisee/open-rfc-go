@@ -103,7 +103,7 @@ Capturing it is not a configuration click, though:
 
 - **Registered Server Program** routes the call — and the ticket — to an
   external program that has registered a Program ID at the gateway. Our server
-  (`internal/rfcserver`, `cmd/rfc-lab`) only listens and sniffs; it does not dial
+  (`internal/rfcserver`, `cmd/orfc-lab`) only listens and sniffs; it does not dial
   out to a gateway and register (`F_SAP_GW` register, `TP_NAME`). The gateway
   record codec exists (`internal/gateway`), so the registration handshake is
   implementable, but it is real work.
@@ -133,13 +133,13 @@ and the SOAP RFC endpoint), verified live, and the ticket format already
 decodes. Ticket-based *classic-RFC* logon is completeness, not capability — it
 matters only on a landscape with neither an open HTTP surface nor a gateway
 password, which we do not currently have. When it does matter, the decisive
-experiment is: implement gateway registration in `rfc-lab`, point a type-T
+experiment is: implement gateway registration in `orfc-lab`, point a type-T
 destination's Program ID at it with *Send Assertion Ticket* on, and read the
 inbound logon.
 
 ## Addendum 2: impersonating the gateway got us to conversation-established
 
-2026-08-21, topology B built and run live (`cmd/rfc-ticketcatch`,
+2026-08-21, topology B built and run live (`cmd/orfc-ticketcatch`,
 `internal/rfcserver/serve_ticketcatch.go`). Our process played the gateway for a
 type-T *Registered Server Program* destination whose Gateway Host pointed at us.
 Progression across runs, each a real SM59 connection test:

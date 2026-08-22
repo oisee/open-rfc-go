@@ -50,7 +50,7 @@ The gateway port `3300 + nn` is the one that matters for classic RFC: the
 handshake, the APPC conversation, and the CPIC logon all ride it. Service name
 `sapgwNN`; the dispatcher `sapdpNN` on `3200 + nn` is a different thing. [our-code][doc]
 
-Our test rig (`cmd/rfc-lab`) binds several ports on one host and the SM59
+Our test rig (`cmd/orfc-lab`) binds several ports on one host and the SM59
 connection type / system number selects the mode: a transparent sniffer in front
 of a real system (to capture), or our own Go server answering directly. [capture]
 

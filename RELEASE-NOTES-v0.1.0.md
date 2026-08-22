@@ -7,24 +7,24 @@ This is the first version with a name and a number. It is a **research preview**
 `0.x` means the API may move, and classic RFC has no transport encryption, so
 nothing here belongs on an untrusted network without a VPN under it.
 
-## The binary is `saprfc`
+## The binary is `orfc`
 
-One binary, two modes — the CLI, and `saprfc mcp` for the Model Context Protocol
+One binary, two modes — the CLI, and `orfc mcp` for the Model Context Protocol
 server, in the shape `vsp` uses. It was previously built from `cmd/rfc`; the name
 changed so it says whose RFC it speaks and does not collide with the IETF sense
 of "rfc" on a `PATH`. The lab tools keep their `rfc-*` names; they are
 development tools, not something you install.
 
 ```sh
-go build -o saprfc ./cmd/saprfc
+go build -o orfc ./cmd/orfc
 
 export SAP_ASHOST=a4h.example SAP_SYSNR=00 SAP_CLIENT=001 \
        SAP_USER=DEVELOPER SAP_PASSWORD='…'
 
-./saprfc ping
-./saprfc info
-./saprfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'
-./saprfc describe STFC_STRUCTURE          # the FM interface as an MCP-tool JSON Schema
+./orfc ping
+./orfc info
+./orfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'
+./orfc describe STFC_STRUCTURE          # the FM interface as an MCP-tool JSON Schema
 ```
 
 Full setup, including a user that actually works and the errors you will hit:
@@ -33,7 +33,7 @@ Full setup, including a user that actually works and the errors you will hit:
 ## As MCP, with a surface you chose
 
 ```sh
-./saprfc mcp --read-only --expose 'STFC_*,BAPI_USER_GET_DETAIL' --hide '*_DELETE'
+./orfc mcp --read-only --expose 'STFC_*,BAPI_USER_GET_DETAIL' --hide '*_DELETE'
 ```
 
 | flag | effect |
@@ -52,6 +52,25 @@ list you wrote beats a red list you hoped was complete.**
 A note on the serializer, since it comes up: there is no "force classic" switch,
 because the client is classic by construction. Forcing classic is a *server*-side
 capability — in that role we issue the logon accept, and can decline fast.
+
+## Answering real calls — `orfc-srv`
+
+The server side now has a front door covering both roles a destination can
+address:
+
+```sh
+orfc-srv -mode typet -listen :3300   # registered external server (SM59 type T)
+orfc-srv -mode type3 -listen :3313   # an ABAP system            (SM59 type 3)
+```
+
+Point an SM59 destination at it and every `CALL FUNCTION … DESTINATION` lands in
+the dispatcher — which is how you exercise a Z function module against this
+implementation **without a second SAP system**. It answers `Z_DOUBLE`, `Z_GREET`,
+`STFC_CONNECTION` and `RFC_PING`; anything else raises `FU_NOT_FOUND`, which
+keeps the conversation alive so the request you sent is still in the capture.
+
+Previously the type-T role lived in its own binary and the type-3 "conscious"
+server was reachable only inside the lab tool.
 
 ## What is new in this release
 

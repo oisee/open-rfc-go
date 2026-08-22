@@ -1,4 +1,4 @@
-# Getting `saprfc` talking to an A4H system
+# Getting `orfc` talking to an A4H system
 
 A4H is SAP's *ABAP Platform Developer Edition* — the free trial appliance most
 people have to hand. Everything here works the same against any ABAP system; A4H
@@ -35,13 +35,13 @@ the blast radius.
 
 The authorization object is `S_RFC`. For read-only exploration
 `ACTVT 16` on `FUGR` for the function groups you intend to call is enough. If
-`saprfc info` works but `saprfc describe` does not, it is almost always `S_RFC`
+`orfc info` works but `orfc describe` does not, it is almost always `S_RFC`
 on the metadata function group (`SDIFRUNTIME`/`RFC1`), not a bug.
 
 ## 2. Build it
 
 ```sh
-go build -o saprfc ./cmd/saprfc
+go build -o orfc ./cmd/orfc
 ```
 
 Go 1.26+, no other toolchain. The binary is self-contained; copy it anywhere.
@@ -58,8 +58,8 @@ export SAP_USER=DEVELOPER
 export SAP_PASSWORD='…'
 export SAP_LANG=EN
 
-./saprfc ping
-./saprfc info
+./orfc ping
+./orfc info
 ```
 
 Or a `.rfc.json` with named systems, so you stop typing them:
@@ -80,7 +80,7 @@ Or a `.rfc.json` with named systems, so you stop typing them:
 ```
 
 ```sh
-./saprfc -s a4h info
+./orfc -s a4h info
 ```
 
 Flags beat environment, environment beats `.rfc.json`. Keep `.rfc.json` out of
@@ -94,11 +94,11 @@ version control — it holds a password.
 ## 4. First calls
 
 ```sh
-./saprfc info                                        # RFC_SYSTEM_INFO
-./saprfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'    # echo, the classic smoke test
-./saprfc describe STFC_STRUCTURE                     # the FM interface as a JSON Schema
-./saprfc search 'BAPI_USER_*'                        # find RFC-enabled FMs
-./saprfc read-table T000 --top 5                     # a table, as rows of columns
+./orfc info                                        # RFC_SYSTEM_INFO
+./orfc call STFC_CONNECTION '{"REQUTEXT":"hi"}'    # echo, the classic smoke test
+./orfc describe STFC_STRUCTURE                     # the FM interface as a JSON Schema
+./orfc search 'BAPI_USER_*'                        # find RFC-enabled FMs
+./orfc read-table T000 --top 5                     # a table, as rows of columns
 ```
 
 `STFC_*` are SAP's own test function modules and exist on every system —
@@ -108,14 +108,14 @@ way to prove a leg works without writing any ABAP.
 
 ## 5. As an MCP server
 
-`saprfc mcp` speaks the Model Context Protocol over stdio, so an assistant can
+`orfc mcp` speaks the Model Context Protocol over stdio, so an assistant can
 call function modules directly. For Claude Code, a `.mcp.json` in the project:
 
 ```json
 {
   "mcpServers": {
     "a4h": {
-      "command": "/abs/path/to/saprfc",
+      "command": "/abs/path/to/orfc",
       "args": ["mcp", "--safe", "--expose", "STFC_*,RFC_READ_TABLE,BAPI_USER_GET_DETAIL"],
       "env": {
         "SAP_ASHOST": "a4h.example",
@@ -154,15 +154,30 @@ before calling.
 
 ## 6. When you want to see the wire
 
-`saprfc` is the client. The lab tools are for looking at the protocol itself:
+`orfc` is the client. Two more tools matter here.
+
+**`orfc-srv` answers calls** — point an SM59 destination at it and your own Z
+function module can be tested against this implementation, no second SAP system
+needed:
 
 ```sh
-go run ./cmd/rfc-lab -target-host <your-sap-host>
+go run ./cmd/orfc-srv -mode typet -listen :3300   # SM59 type T (registered server)
+go run ./cmd/orfc-srv -mode type3 -listen :3313   # SM59 type 3 (an ABAP system)
+```
+
+It answers `Z_DOUBLE`, `Z_GREET`, `STFC_CONNECTION` and `RFC_PING`. Anything else
+raises `FU_NOT_FOUND`, which keeps the conversation alive — so the request the
+client sent is still in the capture, which is usually what you wanted.
+
+**The lab tools are for looking at the protocol itself:**
+
+```sh
+go run ./cmd/orfc-lab -target-host <your-sap-host>
 #   3200/3300  transparent sniffer -> the real system (-dump cap.jsonl)
 #   3313       a generating server, so SM59 can talk to *us*
 
-go run ./cmd/rfc-viewer cap.jsonl            # decoded transcript, values redacted
-go run ./cmd/rfc-viewer -html cap.jsonl      # self-contained HTML inspector
+go run ./cmd/orfc-viewer cap.jsonl            # decoded transcript, values redacted
+go run ./cmd/orfc-viewer -html cap.jsonl      # self-contained HTML inspector
 ```
 
 To make the system dial *you*, create an SM59 **type 3** destination whose
@@ -170,7 +185,7 @@ Target Host is the machine running the lab and whose instance number matches the
 port it listens on. Then any `CALL FUNCTION … DESTINATION 'YOURS'` in ABAP lands
 in the capture.
 
-`rfc-viewer` never touches a live system; it reads a capture file. `-values`
+`orfc-viewer` never touches a live system; it reads a capture file. `-values`
 includes decoded values and may therefore print credentials.
 
 > Captures contain the logon frame. Treat a `.jsonl` dump as a secret.

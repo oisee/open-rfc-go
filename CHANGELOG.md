@@ -10,11 +10,32 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 The first version with a name and a number. Still a research preview: `0.x` means
 the API may move, and classic RFC still has no transport encryption.
 
-**The shipped binary is `saprfc`** (was `cmd/rfc`). It is both the CLI and, as
-`saprfc mcp`, the MCP server — one binary, two modes, like `vsp`. The name was
-chosen so it says what it speaks and does not collide with the IETF sense of
-"rfc" on someone's `PATH`; the lab tools keep their `rfc-*` names because they
-are development tools, not something you install.
+**The shipped binary is `orfc`** — **o**pen-**rfc**, so the attribution rides in
+the name. It is both the CLI and, as `orfc mcp`, the MCP server — one binary, two
+modes, like `vsp`. Plain `rfc` collides with the IETF sense of the word on a
+`PATH` and says nothing about whose RFC it speaks; naming it after either mode
+(`rfc-mcp`, `mcp-rfc`) would bake half the tool into the name; and a
+`sap`-prefixed name was dropped because it mirrors SAP's own binaries
+(`saprouter`, `sapcar`, `saplogon`) and so implies an origin the `NOTICE`
+explicitly disclaims.
+
+The whole family moved to that root, so there is one instead of two: `orfc`,
+`orfc-srv`, `orfc-lab`, `orfc-sniff`, `orfc-viewer`, `orfc-ticketcatch`.
+
+**`orfc-srv` is new** — the server front door, in either role a destination can
+address:
+
+```sh
+orfc-srv -mode typet -listen :3300   # registered external server (SM59 type T)
+orfc-srv -mode type3 -listen :3313   # an ABAP system            (SM59 type 3)
+```
+
+Point an SM59 destination at it and every `CALL FUNCTION … DESTINATION` lands in
+the dispatcher, so a Z function module can be exercised against this
+implementation **without a second SAP system**. Unknown modules raise
+`FU_NOT_FOUND` rather than dropping the connection, so the request stays in the
+capture. The type-T role previously had its own binary and the type-3 server was
+reachable only inside the lab tool.
 
 Getting it running against a system is now written down:
 [`docs/quickstart-a4h.md`](docs/quickstart-a4h.md).
@@ -129,7 +150,7 @@ open-rfc-go now speaks classic RFC **as the server**, not only the client.
 - Request decoding needed no new code: the existing classic decoder reads live
   ABAP fast-serialized requests with zero errors.
 - New: `internal/rfcserver` (ServeReplay / ServeSmart / ServeContentAddressed),
-  `internal/sniffer` per-connection tagging + raw-tee, and `cmd/rfc-lab`, a
+  `internal/sniffer` per-connection tagging + raw-tee, and `cmd/orfc-lab`, a
   multi-protocol endpoint (type 3 sniff/replay/smart/content, HTTP, WebSocket).
 - Known next step: a fast-ser codec that **generates** responses from values (so
   it works for inputs never captured), then real Go/JS function implementations
