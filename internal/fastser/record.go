@@ -67,7 +67,13 @@ const (
 	TagEnd        = 0x45 // 'E' — end marker, no value
 	TagInt4       = 0x4e // 'N' — four-byte little-endian integer, no length byte
 	TagDescriptor = 0x50 // 'P' — type descriptor, one-byte length
+	TagString     = 0x53 // 'S' — STRING: two little-endian lengths, then the value
 )
+
+// stringLengthFlag is set on the first of a STRING header's two lengths. It is
+// present whether or not the value is compressed, so it does not signal
+// compression; what it does mean is not established.
+const stringLengthFlag = 0xC000
 
 // charFlag (declared in fastser.go) sits between a character field's length and
 // its value. Its meaning is not established; it is 0x80 in every capture, and
@@ -85,6 +91,7 @@ const (
 	framingLen2BE                  // <len:2 big-endian> <value>
 	framingFixed4                  // <4 bytes>, no length
 	framingNone                    // no value at all
+	framingString                  // <0xC000|len:LE16> <len:LE16> <value>
 )
 
 var tagFraming = map[byte]framing{
@@ -94,6 +101,7 @@ var tagFraming = map[byte]framing{
 	TagPadded:     framingLen2BE,
 	TagInt4:       framingFixed4,
 	TagEnd:        framingNone,
+	TagString:     framingString,
 }
 
 // Record is one decoded fast-serialization record.
@@ -155,6 +163,20 @@ func decodeRecordAt(payload []byte, off int) (rec Record, next int, ok bool) {
 			return Record{}, off, false
 		}
 		start, length = off+3, int(payload[off+1])<<8|int(payload[off+2])
+	case framingString:
+		// The header carries the length twice: once with 0xC000 set, then
+		// plain. Requiring the two to agree is strong corroboration — a run of
+		// arbitrary bytes is very unlikely to satisfy it — which is what lets a
+		// STRING be recognised without a surrounding anchor.
+		if off+4 >= len(payload) {
+			return Record{}, off, false
+		}
+		flagged := int(payload[off+1]) | int(payload[off+2])<<8
+		plain := int(payload[off+3]) | int(payload[off+4])<<8
+		if flagged != plain|stringLengthFlag {
+			return Record{}, off, false
+		}
+		start, length = off+5, plain
 	}
 
 	// A zero-length value carries nothing and is indistinguishable from noise,
@@ -272,6 +294,9 @@ func DecodeTypedFields(payload []byte) []TypedField {
 			switch rec.Tag {
 			case TagChar:
 				// decodeRecordAt already required the flag byte.
+				f.Value, f.HasValue = rec, true
+			case TagString:
+				// decodeRecordAt already required the two lengths to agree.
 				f.Value, f.HasValue = rec, true
 			case TagInt4:
 				if next < len(payload) && payload[next] == TagEnd {

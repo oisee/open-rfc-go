@@ -184,6 +184,42 @@ every frame in the series by a flat +6 bytes and changed nothing else — same
 collapse, same slopes, same literal runs. Which fits what it does: it elides on
 the response side, and these are requests.
 
+### The STRING field, and what the compression flag is not
+
+A `STRING` rides under tag `0x53` (`'S'`) with its length written **twice** —
+once with `0xC000` set, then plain — and then one byte per character:
+
+```
+'P' 0c "\TYPE=STRING"  18  0a "TABLE_LINE"  'S' 08c0 0800 "ABCDEFGH"
+```
+
+The two copies corroborate each other, which is enough to recognise a STRING
+without a surrounding anchor: arbitrary bytes are very unlikely to satisfy
+`first == 0xC000 | second`.
+
+`0xC000` is **not** a compression flag. It is set at 510 characters (literal) and
+at 3 000 (compressed) alike. What it means is not established.
+
+The declared length is the **original** size, not the encoded one, so above the
+threshold it far exceeds the bytes actually present. The decoder therefore refuses
+such a field instead of returning a short value or reading past the payload — a
+compressed STRING is reported as unaccounted for, not silently mis-decoded.
+
+SM59's **"Deactivate RFC Compression" does not switch this off.** With mask bit
+`0x04` set the whole series came back byte-for-byte identical: 512 characters
+literal at 919 bytes, 513 compressed at 448, 3 000 at 458. So the folding is
+intrinsic to the fast serializer rather than an optional transport feature, and
+decoding large fast payloads requires implementing it.
+
+That also corrects an earlier note here. Bit `0x04` was first measured as having
+no effect and written up as "compression was not active to begin with" — but that
+run used a payload under 512 bytes, where nothing would have been compressed
+either way. The flag was tested on a sample that could not show a difference.
+
+We do **not** already own the decompressor. The classic path's "simple
+compression" (`decodeSimpleCompressedTableRow`) expands a short row by repeating
+its last byte — trailing-run fill, unrelated to the back-referencing scheme here.
+
 ### What is not modelled, and why it is left alone
 
 The bytes between a `\TYPE=` descriptor and the field name are type metadata of a

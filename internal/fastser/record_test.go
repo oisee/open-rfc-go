@@ -262,3 +262,64 @@ func mustRecords(payload []byte) []Record {
 	recs, _ := DecodeRecords(payload)
 	return recs
 }
+
+// stringField8 is the whole `QUESTION` parameter of a live STFC_STRING request
+// with an eight-character argument:
+//
+//	'P' 0c "\TYPE=STRING"  18  0a "TABLE_LINE"  'S' 08c0 0800 "ABCDEFGH"
+//
+// The 0x18 is the STRING type-metadata byte, unmodelled like CHAR30's.
+const stringField8 = "500c5c545950453d535452494e47180a5441424c455f4c494e455308c008004142434445464748"
+
+func TestDecodeStringFieldDoubleLength(t *testing.T) {
+	fields := DecodeTypedFields(mustHex(t, stringField8))
+	if len(fields) != 1 {
+		t.Fatalf("got %d typed fields, want 1: %+v", len(fields), fields)
+	}
+	if fields[0].TypeName != "STRING" {
+		t.Errorf("TypeName = %q, want STRING", fields[0].TypeName)
+	}
+	if !fields[0].HasValue || fields[0].Value.Tag != TagString {
+		t.Fatalf("value = %+v, want a STRING record", fields[0].Value)
+	}
+	if got := string(fields[0].Value.Value); got != "ABCDEFGH" {
+		t.Errorf("value = %q, want ABCDEFGH", got)
+	}
+	// One byte per character, established by a length differential on the wire.
+	if len(fields[0].Value.Value) != 8 {
+		t.Errorf("value = %d bytes for 8 characters; STRING is one byte per character", len(fields[0].Value.Value))
+	}
+}
+
+func TestStringHeaderLengthsMustAgree(t *testing.T) {
+	// The two lengths corroborate each other. A header whose copies disagree is
+	// not a STRING, and accepting it would let arbitrary bytes pose as one.
+	bad := []byte{TagString, 0x08, 0xc0, 0x09, 0x00, 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'}
+	for _, r := range mustRecords(bad) {
+		if r.Tag == TagString {
+			t.Errorf("accepted a STRING whose two lengths disagree: %+v", r)
+		}
+	}
+	// And the flag must actually be set on the first copy.
+	noFlag := []byte{TagString, 0x08, 0x00, 0x08, 0x00, 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
+	for _, r := range mustRecords(noFlag) {
+		if r.Tag == TagString {
+			t.Errorf("accepted a STRING without the length flag: %+v", r)
+		}
+	}
+}
+
+func TestCompressedStringIsRejectedNotMisread(t *testing.T) {
+	// Above 512 bytes the payload is compressed, so the declared length far
+	// exceeds what is actually present. The decoder must refuse rather than
+	// return a short or over-read value — the declared length is the original
+	// size, not the encoded one.
+	payload := append([]byte{TagString, 0xb8, 0xcb, 0xb8, 0x0b}, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ")...)
+	recs, covered := DecodeRecords(payload)
+	if len(recs) != 0 {
+		t.Errorf("got %d records from a compressed STRING, want none: %+v", len(recs), recs)
+	}
+	if covered != 0 {
+		t.Errorf("covered %d bytes, want 0", covered)
+	}
+}
