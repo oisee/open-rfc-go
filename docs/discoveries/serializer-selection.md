@@ -138,6 +138,52 @@ layout — observed: `I`, `CHAR30`, `CHAR90`, `STRING`, `RFCSI`, `RFCTEST`,
 `SYST_LISEL`, `%_T00004S0`. So a decoder is: parse the framing, resolve the named
 type through DDIC, apply the ordinary structure codec.
 
+### Scalar widths, and the compression threshold
+
+A purpose-built probe (`Z_FS_PROBE`, one type and one length per call) drove each
+type over the fast destination with everything else held fixed. It calls
+`RFC_PING` first: without that warm-up the measured call is the first on the
+connection and therefore rides in the logon frame, whose session tokens jitter run
+to run and bury a one-byte difference.
+
+| type | cost |
+|---|---|
+| `STRING` | **1.00 byte per character** |
+| `XSTRING` | **1.00 byte per byte** |
+| `STRING` nested in a deep structure | 1.00 byte per character, plus ~54 constant |
+
+So `STRING` and `XSTRING` travel one byte per unit, like `char` — not UTF-16, and
+not padded to any declared width.
+
+**Above 512 bytes the payload is compressed.** Bisected on `STFC_STRING`: a
+512-character argument is literal and the frame has grown exactly one byte per
+character all the way up; 513 characters collapse the frame from 919 bytes to 448,
+leaving a 26-byte literal remnant. A 3 000-character argument then costs 458.
+
+| characters | frame | longest literal run |
+|---|---|---|
+| 510 | 917 | 512 |
+| 511 | 918 | 513 |
+| **512** | **919** | **514** |
+| **513** | **448** | **26** |
+| 3 000 | 458 | 26 |
+
+The scheme is LZ-like — one literal copy of the repeating input survives, the rest
+becomes back-references — and it covers the **whole parameter block, field names
+included**. That retro-explains an earlier puzzle: in a large `STFC_STRUCTURE`
+frame only 4 of `RFCTEST`'s 12 field names appear literally, and the others show
+up as fragments like `HEX3`, `TIME`, `DATA2`. Those are not an elided-prefix naming
+scheme, as first guessed; the frame was simply over the threshold.
+
+The trigger is **size, not structure**. Tables looked like they switched at three
+rows, but that was only where their block happened to cross 512 bytes; a plain
+string crosses it with no table involved.
+
+The **delta manager is not part of this**. Deactivating it (mask bit `0x01`) moved
+every frame in the series by a flat +6 bytes and changed nothing else — same
+collapse, same slopes, same literal runs. Which fits what it does: it elides on
+the response side, and these are requests.
+
 ### What is not modelled, and why it is left alone
 
 The bytes between a `\TYPE=` descriptor and the field name are type metadata of a

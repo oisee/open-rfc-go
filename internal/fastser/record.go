@@ -32,6 +32,19 @@ import "bytes"
 // rules out UTF-16 for char values and rules out padding to the declared ABAP
 // width — the parameter is CHAR30 and only the significant bytes travel.
 //
+// Payloads are COMPRESSED above 512 bytes. Measured by bisection on a live
+// STFC_STRING call: a 512-character argument travels literally (the frame grows
+// exactly one byte per character up to there), and 513 characters collapse the
+// frame from 919 bytes to 448 with only a 26-byte literal remnant. The scheme is
+// LZ-like — one literal copy of the repeating input survives and the rest becomes
+// back-references — and it applies to the whole parameter block, field names
+// included, not just to table content.
+//
+// The practical consequence for this decoder: it reads the literal form only.
+// Above the threshold DecodeRecords will account for very little, and that is the
+// encoding, not a bug. Check the coverage count rather than assuming a short
+// result means a malformed payload. Decompression is not implemented.
+//
 // See docs/discoveries/serializer-selection.md. What is still NOT modelled: the
 // 0x5001 container's nesting; the type-metadata bytes between a `\TYPE=`
 // descriptor and the field name (0x03 for I, 0x18 for STRING, 0x06 0x3c 0x00 for
