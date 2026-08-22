@@ -100,18 +100,63 @@ Measured, one full driver run per value:
 
 ## What each format looks like
 
-**Fast** is tagged and self-describing: an ASCII type descriptor and field name,
-each length-prefixed, then the raw little-endian value. `Z_DOUBLE` with `N=21`:
+**Fast** is tagged and self-describing, and **the tag decides how its value is
+framed** — there is no single length rule. Established by a controlled
+differential: one caller parameter varied at a time, everything else held fixed.
+
+| tag | | framing |
+|---|---|---|
+| `0x43` | `'C'` char | `<len:1> 0x80 <len bytes>` — single-byte, **not** UTF-16 |
+| `0x4e` | `'N'` int4 | `<4 bytes>` little-endian, no length |
+| `0x50` | `'P'` descriptor | `<len:1> <len bytes>` — the `\TYPE=` announcement |
+| `0x30` | `'0'` padded text | `<len:2 BE> <len bytes>` — padded UTF-16LE |
+| `0x45` | `'E'` end | no value |
+
+Two whole parameters, captured verbatim:
 
 ```
-44 01 50 07 "\TYPE=I" 03 0a "TABLE_LINE" 15000000 45 5001…
-       len=7                    len=10     value   'E'
+Z_DOUBLE, N=256   50 07 "\TYPE=I"       03 0a "TABLE_LINE"  4e 00010000        45
+Z_GREET, NAME=ABCD 50 0c "\TYPE=CHAR30"  06 3c 00  0a "TABLE_LINE"  43 04 80 "ABCD" 45
 ```
 
-Composite types are referenced by **DDIC type name**, not by inline layout —
-observed: `I`, `CHAR90`, `STRING`, `RFCSI`, `RFCTEST`, `SYST_LISEL`, `%_T00004S0`.
-So a decoder is: parse the tag/length framing, resolve the named type through DDIC,
-apply the ordinary structure codec.
+The evidence behind each claim:
+
+- **Little-endian.** `N=1 -> 4e 01000000`, `N=2 -> 4e 02000000`, `N=256 -> 4e
+  00010000`. 256 is the value that settles it; the frame length never moved, so
+  the width is fixed at four.
+- **One byte per character.** The `Z_GREET` frame measured 386, 387, 389 and 393
+  bytes for names of 1, 2, 4 and 8 characters — exactly one byte each. That rules
+  out UTF-16 for char values, and rules out padding to the declared width: the
+  parameter is `CHAR30` and only the significant bytes travel.
+- **The `0x80` flag is real.** It sits between a character field's length and its
+  value. Its meaning is unknown; skipping it is required to read the value at all,
+  and a decoder that treats the field as `<tag><len><value>` is wrong by one byte
+  for every character field on the wire.
+
+Composite types are referenced by **DDIC type name** rather than by an inline
+layout — observed: `I`, `CHAR30`, `CHAR90`, `STRING`, `RFCSI`, `RFCTEST`,
+`SYST_LISEL`, `%_T00004S0`. So a decoder is: parse the framing, resolve the named
+type through DDIC, apply the ordinary structure codec.
+
+### What is not modelled, and why it is left alone
+
+The bytes between a `\TYPE=` descriptor and the field name are type metadata of a
+shape we have not pinned down: `03` for `I`, `18` for `STRING`, `06 3c 00` for
+`CHAR30`, `13 86 00` for `RFCTEST`. Reading the last two as a little-endian width
+fits `CHAR30` at 60 = 30x2 and does **not** fit `RFCTEST`, so it is recorded here
+and not implemented.
+
+One negative result is worth keeping, because it is a trap. Recovering from an
+unmodelled region by stepping one byte at a time does not work here: the tags are
+ASCII letters, so `'E'` (end) and `'N'` (int4) occur inside ordinary field names
+like `TABLE_LINE`. A skipping decoder reads those as records, drifts, and swallows
+the real value that follows. Phantom records are worse than parsing less. The
+decoder therefore parses strictly and stops, and finds values by anchoring on the
+`\TYPE=` signature — which carries its own length and so cannot be faked by
+accident — then requiring corroboration before accepting a value: a character
+record must have its flag byte, an integer must be followed by the end marker.
+
+The `0x5001` container's nesting is also still open.
 
 Its version is negotiated in the clear. SM59's *Fast Serialization Test* button
 queries three names and the answer carries the value:
