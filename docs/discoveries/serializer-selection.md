@@ -22,10 +22,22 @@ gives the codes directly:
 
 | SM59 "Serializer" | stored as | wire |
 |---|---|---|
-| Fast serializer | `1=00` | see the `7=` row below |
+| Classic serializer | `1=00`, no `7=` | **classic** |
+| Fast serializer | `1=00` **and** `7=6041` | **fast** |
 | basXML serializer | `1=11` | **classic** — it negotiates down |
 | Force basXML serializer | `1=21` | **basXML, binary** |
-| Classic serializer | *open* | *open* |
+
+Classic and Fast store the *same* `1=` value. What separates them is whether the
+dropdown also writes `7=6041`. Confirmed directly — one destination, `1=00`
+throughout, one token added:
+
+```
+1=00, 7= absent  ->  classic   16 738 B, entropy 3.48
+1=00, 7=6041     ->  fast       9 636 B, 17 \TYPE= descriptors
+```
+
+SM59 omits a token entirely when its value is the default, so an absent `o=` means
+a zero flag mask and an absent `7=` means no override.
 
 `1=20` and `1=22` — values not offered by the dropdown — put **textual** basXML on
 the wire. Any first digit other than `2` yields classic.
@@ -138,7 +150,11 @@ so a capture is self-labelling whichever serializer is in force.
 
 ## Open
 
-- The code the dropdown stores for **Classic serializer** has not been read back.
 - Why `1=11` ("basXML serializer") negotiates down to classic between two systems
   that both support basXML.
-- Whether the delta manager's effect has a name on the wire.
+- Whether the delta manager's effect has a name on the wire. With the manager
+  active, classic, and three distinct rows, each row's payload still appears
+  exactly once and no `MULTIREF`/`RFCTAB40` name shows up. That is expected: a
+  delta manager has nothing to elide unless the *same* table crosses the wire more
+  than once on one connection. The driver sends each table once, so the mechanism
+  has not yet been given anything to do.
