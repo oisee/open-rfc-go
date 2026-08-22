@@ -152,12 +152,37 @@ so a capture is self-labelling whichever serializer is in force.
 
 - Why `1=11` ("basXML serializer") negotiates down to classic between two systems
   that both support basXML.
-- Whether the delta manager's effect has a name on the wire. With the manager
-  active, classic, and three distinct rows, each row's payload still appears
-  exactly once and no `MULTIREF`/`RFCTAB40` name shows up. That is expected: a
-  delta manager has nothing to elide unless the *same* table crosses the wire more
-  than once on one connection. The driver sends each table once, so the mechanism
-  has not yet been given anything to do.
+- Why `1=11` ("basXML serializer") negotiates down to classic between two systems
+  that both support basXML.
+
+## The delta manager, caught working
+
+Sending the same table three times on one conversation gives it something to
+elide. The driver builds three `RFCTEST` rows, restores a pristine copy before
+each call, and calls `STFC_STRUCTURE` three times, so the content crossing the
+wire is byte-identical every time. Classic serializer, A/B on mask bit `0x01`:
+
+| delta manager | request | response | rows in response |
+|---|---|---|---|
+| active | 1 557 B, 3 rows | **1 434 B** | **0** |
+| deactivated (`0x01`) | 1 553 B, 3 rows | **2 242 B** | 3 |
+
+808 bytes a call, exactly the table content. The caller still sees `rows=4` either
+way, so nothing is lost — the table is reconstructed.
+
+Two things follow.
+
+**It is a response-side mechanism.** The request always carries the full table; it
+is the *server* that elides. Anything we send as a client is unaffected.
+
+**The delta is taken against the request, not against a previous call.** Elision
+happens on call #1 already. `STFC_STRUCTURE` echoes its input table back, and with
+the manager active the server declines to return data the caller had just handed
+it.
+
+For the server track this is a matched pair: one request with two legal responses.
+The 2 242-byte form is the degenerate full encoding we would emit; the 1 434-byte
+form is what we must be able to read. Which is exactly the asymmetry below.
 
 ## What the delta manager means for our server — decode and encode are not symmetric
 
