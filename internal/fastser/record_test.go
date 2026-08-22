@@ -105,8 +105,16 @@ func TestStrictStreamStopsAtUnmodelledMetadata(t *testing.T) {
 	payload := mustHex(t, charFieldABCD)
 	recs, covered := DecodeRecords(payload)
 
-	if len(recs) != 1 || !recs[0].IsTypeDescriptor() {
-		t.Fatalf("want exactly the descriptor before the gap, got %+v", recs)
+	if len(recs) < 1 || !recs[0].IsTypeDescriptor() {
+		t.Fatalf("want the descriptor first, got %+v", recs)
+	}
+	// The 0x06 length record after it is modelled now; the untagged field name
+	// after that is not, which is where the strict stream still stops.
+	if len(recs) != 2 || recs[1].Tag != TagLength {
+		t.Fatalf("want descriptor then length record, got %+v", recs)
+	}
+	if n, ok := recs[1].DeclaredLength(); !ok || n != 60 {
+		t.Errorf("CHAR30 length record = %d (ok=%v), want 60", n, ok)
 	}
 	// Stopping is the point: the bytes after the descriptor are type metadata
 	// we do not model, and walking past them invents records. If this ever
@@ -138,7 +146,7 @@ func TestTagLettersInFieldNamesDoNotBecomeRecords(t *testing.T) {
 	}
 }
 
-func TestFieldNameOnlyWhereTheNameRecordIsTagged(t *testing.T) {
+func TestFieldNameRecoveredByEitherAnchor(t *testing.T) {
 	// The int4 field carries its name as a tagged record (0x03 0x0a "TABLE_LINE")
 	// and the name comes back. The CHAR30 field carries the same name with a
 	// different, unmodelled byte in front of the length, so no name is claimed.
@@ -146,8 +154,10 @@ func TestFieldNameOnlyWhereTheNameRecordIsTagged(t *testing.T) {
 	if got := DecodeTypedFields(mustHex(t, intField256))[0].FieldName; got != "TABLE_LINE" {
 		t.Errorf("int4 FieldName = %q, want TABLE_LINE", got)
 	}
-	if got := DecodeTypedFields(mustHex(t, charFieldABCD))[0].FieldName; got != "" {
-		t.Errorf("char FieldName = %q, want \"\" until the metadata shape is known", got)
+	// The CHAR30 field's name is untagged, so the descriptor path alone cannot
+	// see it — the length record anchors it from the other side and supplies it.
+	if got := DecodeTypedFields(mustHex(t, charFieldABCD))[0].FieldName; got != "TABLE_LINE" {
+		t.Errorf("char FieldName = %q, want TABLE_LINE via the length anchor", got)
 	}
 }
 
@@ -321,5 +331,71 @@ func TestCompressedStringIsRejectedNotMisread(t *testing.T) {
 	}
 	if covered != 0 {
 		t.Errorf("covered %d bytes, want 0", covered)
+	}
+}
+
+// char50Literal and char210Literal are the same five-character value passed to a
+// CHAR50 and to a CHAR210 parameter of a live function module. The frames are
+// byte-identical here, which is what proves the 0x06 record carries the value's
+// length rather than the field's declared width:
+//
+//	06 0a00  0a "TABLE_LINE"  'C' 05 80 "ABCDE"  'E'
+const char50Literal = "060a000a5441424c455f4c494e45430580414243444545"
+const char210Literal = char50Literal
+
+func TestLengthRecordIsTheValueNotTheDeclaredWidth(t *testing.T) {
+	for _, tc := range []struct{ name, fx string }{
+		{"CHAR50", char50Literal},
+		{"CHAR210", char210Literal},
+	} {
+		payload := mustHex(t, tc.fx)
+		name, val, ok := DecodeLengthAnchoredField(payload, 0)
+		if !ok {
+			t.Fatalf("%s: the length-anchored field did not decode", tc.name)
+		}
+		if name != "TABLE_LINE" {
+			t.Errorf("%s: name = %q, want TABLE_LINE", tc.name, name)
+		}
+		rec, _, _ := decodeRecordAt(payload, 0)
+		got, ok := rec.DeclaredLength()
+		if !ok {
+			t.Fatalf("%s: DeclaredLength refused its own record", tc.name)
+		}
+		// Five characters, ten bytes — for a field declared 50 wide and for one
+		// declared 210. Were this the declared width it would read 100 and 420.
+		// The CHAR30 capture goes the other way; see the note on TagLength. This
+		// test pins the observation, not a rule.
+		if got != 10 {
+			t.Errorf("%s: length record = %d, want 10 (5 characters x 2)", tc.name, got)
+		}
+		if val.Tag != TagChar {
+			t.Errorf("%s: value tag = %#x, want a char record", tc.name, val.Tag)
+		}
+		if string(val.Value) != "ABCDE" {
+			t.Errorf("%s: value = %q, want ABCDE", tc.name, val.Value)
+		}
+		if got < len(val.Value)*2 {
+			t.Errorf("%s: length record %d is below twice the %d value bytes", tc.name, got, len(val.Value))
+		}
+	}
+}
+
+func TestDeclaredLengthRefusesOtherRecords(t *testing.T) {
+	if _, ok := (Record{Tag: TagChar, Value: []byte{1, 2}}).DeclaredLength(); ok {
+		t.Error("a char record is not a length record")
+	}
+	if _, ok := (Record{Tag: TagLength, Value: []byte{1}}).DeclaredLength(); ok {
+		t.Error("a length record must be exactly two bytes")
+	}
+}
+
+func TestIntCarriesNoLengthRecord(t *testing.T) {
+	// The int4 field from a live Z_FS_TYPES call: descriptor, name, value, end,
+	// and deliberately no 0x06 — the width follows from the tag.
+	recs, _ := DecodeRecords(mustHex(t, intField256))
+	for _, r := range recs {
+		if r.Tag == TagLength {
+			t.Errorf("int4 field carried a length record: %+v", r)
+		}
 	}
 }

@@ -56,11 +56,26 @@ import "bytes"
 // Tag values whose framing is confirmed by a capture. Adding a tag here without
 // a capture behind it would defeat the point of the coverage count.
 const (
+	// TagLength precedes a value with a length in bytes, written as two
+	// little-endian bytes counting UTF-16 units. Fixed-width tags (int1/2/4)
+	// carry no such record; their width follows from the tag.
+	//
+	// WHAT it is the length OF is not settled, and the captures disagree:
+	//
+	//	CHAR50  parameter, value "ABCDE"  -> 10   (the value: 5 x 2)
+	//	CHAR210 parameter, value "ABCDE"  -> 10   (the value again, byte-identical)
+	//	CHAR30  parameter, value "ABCD"   -> 60   (the declared width: 30 x 2)
+	//
+	// The first two rule out "declared width" on their own — the same literal in
+	// fields declared 50 and 210 wide produces the same record, where a width
+	// would give 100 and 420. The third rules out "value length" just as firmly.
+	// Something else varies between those calls and has not been isolated, so no
+	// rule is claimed and nothing downstream may assume one.
+	TagLength = 0x06
 	// TagName is the byte seen before a field name in the int4 case. It is NOT
-	// universal: that position holds 0x18 before a STRING field's name and 0x00
-	// before a CHAR30's, so what precedes a name is type metadata of a shape we
-	// have not pinned down. Name extraction therefore works for the confirmed
-	// cases and degrades to "no name" elsewhere, rather than guessing.
+	// universal: that position holds 0x18 before a STRING field's name, so what
+	// precedes a name is not always the same record. Name extraction therefore
+	// works for the confirmed cases and degrades to "no name" elsewhere.
 	TagName       = 0x03
 	TagPadded     = 0x30 // '0' — padded UTF-16LE text, two-byte big-endian length
 	TagChar       = 0x43 // 'C' — character field, one-byte length then the 0x80 flag
@@ -92,6 +107,7 @@ const (
 	framingFixed4                  // <4 bytes>, no length
 	framingNone                    // no value at all
 	framingString                  // <0xC000|len:LE16> <len:LE16> <value>
+	framingFixed2                  // <2 bytes>, no length
 )
 
 var tagFraming = map[byte]framing{
@@ -102,6 +118,7 @@ var tagFraming = map[byte]framing{
 	TagInt4:       framingFixed4,
 	TagEnd:        framingNone,
 	TagString:     framingString,
+	TagLength:     framingFixed2,
 }
 
 // Record is one decoded fast-serialization record.
@@ -148,6 +165,8 @@ func decodeRecordAt(payload []byte, off int) (rec Record, next int, ok bool) {
 		return Record{Offset: off, Tag: tag}, off + 1, true
 	case framingFixed4:
 		start, length = off+1, 4
+	case framingFixed2:
+		start, length = off+1, 2
 	case framingLen1:
 		if off+1 >= len(payload) {
 			return Record{}, off, false
@@ -314,7 +333,76 @@ func DecodeTypedFields(payload []byte) []TypedField {
 		out = append(out, f)
 		i = after - 1
 	}
+
+	// Fields the length record introduces. A descriptor-anchored field can reach
+	// the same value from the other side, so a hit on a value we already have is
+	// merged rather than appended — and it supplies the field name, which the
+	// descriptor path cannot always recover.
+	for i := 0; i < len(payload); i++ {
+		name, val, ok := DecodeLengthAnchoredField(payload, i)
+		if !ok {
+			continue
+		}
+		merged := false
+		for j := range out {
+			if out[j].HasValue && out[j].Value.Offset == val.Offset {
+				if out[j].FieldName == "" {
+					out[j].FieldName = name
+				}
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			out = append(out, TypedField{FieldName: name, Value: val, HasValue: true})
+		}
+	}
 	return out
+}
+
+// DecodeLengthAnchoredField reads the field that a TagLength record introduces:
+//
+//	0x06 <len:2 LE>  <namelen:1> <NAME>  <value record>  ['E']
+//
+// The name here carries no tag of its own — only a length byte — which is why it
+// cannot be found by scanning for records. It is reachable because the 0x06
+// record anchors the position: a two-byte length followed by a plausible
+// identifier and then a value record is corroboration enough, and the declared
+// length must agree with the value for the field to be accepted at all.
+//
+// Returns ok=false when off is not a TagLength record or the sequence after it
+// does not hold together.
+func DecodeLengthAnchoredField(payload []byte, off int) (name string, value Record, ok bool) {
+	rec, next, ok := decodeRecordAt(payload, off)
+	if !ok || rec.Tag != TagLength {
+		return "", Record{}, false
+	}
+	declared, _ := rec.DeclaredLength()
+
+	if next >= len(payload) {
+		return "", Record{}, false
+	}
+	n := int(payload[next])
+	if n == 0 || next+1+n > len(payload) {
+		return "", Record{}, false
+	}
+	nameBytes := payload[next+1 : next+1+n]
+	if !isPlainName(nameBytes) {
+		return "", Record{}, false
+	}
+
+	val, _, ok := decodeRecordAt(payload, next+1+n)
+	if !ok {
+		return "", Record{}, false
+	}
+	// The declared length counts UTF-16 units, so it can never be smaller than
+	// twice the bytes the value occupies. That is the strongest check available
+	// while it is unsettled whether the number describes the value or the
+	// field — a stricter equality would reject the CHAR30 capture, which is real.
+	if declared < len(val.Value)*2 {
+		return "", Record{}, false
+	}
+	return string(nameBytes), val, true
 }
 
 // isPlainName reports whether the bytes look like an ABAP identifier, which is
@@ -348,6 +436,11 @@ func EncodeRecord(tag byte, value []byte) ([]byte, bool) {
 			return nil, false
 		}
 		return append([]byte{tag}, value...), true
+	case framingFixed2:
+		if len(value) != 2 {
+			return nil, false
+		}
+		return append([]byte{tag}, value...), true
 	case framingLen1:
 		if len(value) == 0 || len(value) > 0xff {
 			return nil, false
@@ -374,4 +467,17 @@ func clone(b []byte) []byte {
 	out := make([]byte, len(b))
 	copy(out, b)
 	return out
+}
+
+// DeclaredLength returns the length a TagLength record carries, in bytes counted
+// as UTF-16 units, and whether the record was one.
+//
+// It is deliberately not called ValueLength. Whether the number describes the
+// value or the field is unsettled — see the note on TagLength — and a caller that
+// needs one or the other must check against the value it actually decoded.
+func (r Record) DeclaredLength() (int, bool) {
+	if r.Tag != TagLength || len(r.Value) != 2 {
+		return 0, false
+	}
+	return int(r.Value[0]) | int(r.Value[1])<<8, true
 }
