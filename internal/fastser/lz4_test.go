@@ -103,3 +103,72 @@ func FuzzDecompressBlock(f *testing.F) {
 		}
 	})
 }
+
+// headeredBlock is a compression header and its block, contiguous, exactly as
+// they sit in a live STFC_STRING response:
+//
+//	41020000  uncompressed size, 577, little-endian
+//	60000000  compressed size, 96
+//	f506...   the LZ4 block
+const headeredBlock = "4102000060000000f50654085155455354494f4e54084d59414e53574552511400ff2c" +
+	"4401500c5c545950453d535452494e47180a5441424c455f4c494e455301c201024142" +
+	"434445464748494a4b4c4d4e4f505152535455565758595a1a00ffd1505051525345"
+
+func TestDecodeCompressedAtReadsBothSizes(t *testing.T) {
+	payload := mustHex(t, headeredBlock)
+	c, next, ok := DecodeCompressedAt(payload, 0)
+	if !ok {
+		t.Fatal("the captured header and block did not decode")
+	}
+	if c.UncompressedSize != 577 || c.CompressedSize != 96 {
+		t.Errorf("sizes = %d/%d, want 577/96", c.UncompressedSize, c.CompressedSize)
+	}
+	if len(c.Data) != 577 {
+		t.Errorf("produced %d bytes, want 577", len(c.Data))
+	}
+	if next != len(payload) {
+		t.Errorf("next = %d, want %d — header and block together", next, len(payload))
+	}
+	if !strings.Contains(string(c.Data), `\TYPE=STRING`) {
+		t.Error("the payload should be fast-serialization content")
+	}
+}
+
+func TestCompressionHeaderIsNotGuessable(t *testing.T) {
+	// The header is what makes a block locatable. Without it, a truncated block
+	// can still end on LZ4's literals-only final sequence, so several wrong
+	// lengths look valid — which is why the sizes are enforced rather than
+	// inferred. A header whose numbers do not describe the block must be refused.
+	payload := mustHex(t, headeredBlock)
+
+	badU := append([]byte(nil), payload...)
+	badU[0] = 0x40 // claim 576 uncompressed
+	if _, _, ok := DecodeCompressedAt(badU, 0); ok {
+		t.Error("a wrong uncompressed size must be refused")
+	}
+
+	badC := append([]byte(nil), payload...)
+	badC[4] = 0x5f // claim 95 compressed
+	if _, _, ok := DecodeCompressedAt(badC, 0); ok {
+		t.Error("a wrong compressed size must be refused")
+	}
+
+	// A block never expands, so sizes that say otherwise are not a header.
+	swapped := append([]byte(nil), payload...)
+	swapped[0], swapped[4] = swapped[4], swapped[0]
+	if _, _, ok := DecodeCompressedAt(swapped, 0); ok {
+		t.Error("compressed larger than uncompressed must be refused")
+	}
+}
+
+func TestFindCompressedIgnoresNoise(t *testing.T) {
+	payload := append([]byte{0xff, 0x00, 0x13, 0x37}, mustHex(t, headeredBlock)...)
+	payload = append(payload, 0xde, 0xad, 0xbe, 0xef)
+	found := FindCompressed(payload)
+	if len(found) != 1 {
+		t.Fatalf("found %d blocks, want exactly 1", len(found))
+	}
+	if found[0].Offset != 4 || found[0].UncompressedSize != 577 {
+		t.Errorf("found %+v, want the block at offset 4", found[0])
+	}
+}

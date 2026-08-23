@@ -334,8 +334,22 @@ each consuming exactly the declared compressed byte count and emitting exactly t
 declared uncompressed one. There is no LZ4 frame header, no magic and no checksum;
 the surrounding framing supplies both sizes.
 
-`internal/fastser.DecompressBlock` implements it, so payloads above the 512-byte
-threshold are now readable. This supersedes the note that decompression would be a
+**Where a block is** is not guessable, and does not have to be: eight bytes
+immediately before it carry both sizes.
+
+```
+<uncompressed size:4 LE> <compressed size:4 LE> <block>
+```
+
+Guessing was tried and does not work — a block truncated early can still finish
+on LZ4's mandatory literals-only final sequence, so several wrong lengths look
+valid. With the header there is nothing to infer: across the whole corpus **155
+blocks** are located this way and every one decodes to exactly its declared
+uncompressed size while consuming exactly its declared compressed size, and no
+other offset in any frame satisfies both.
+
+`internal/fastser.DecompressBlock` and `DecodeCompressedAt` implement it, so
+payloads above the 512-byte threshold are now readable. This supersedes the note that decompression would be a
 substantial separate project: the block format is small and published.
 
 ### The resynchronisation trap
