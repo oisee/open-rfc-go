@@ -14,27 +14,29 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 serializer writes it. We took it off the wire — see
 [serializer selection](docs/discoveries/serializer-selection.md).)*
 
-> ## 🔬 The serializers, mapped — and the fast one decoded
+> ## 🎉 The fast serializer is decoded — records, types, and the compression
 >
-> **2026-08-22 — we can now select any of SAP's four serializers on demand and
-> read what each puts on the wire.** The destination has two independent knobs and
-> the second overrides the first, which is why a destination can read *"Fast
-> serializer"* while storing something else entirely. With that settled, a
-> controlled differential — vary one parameter, hold the rest, capture both ends —
-> gave the **fast serializer's record grammar**: tag-dependent framing, `INT4`
-> little-endian and fixed-width, `char`/`STRING`/`XSTRING` at **one byte per unit**
-> (not UTF-16, not padded), and the version handshake negotiating `FAST_SER_VERS = 3`.
-> Payloads above **512 bytes are compressed** — intrinsic to that serializer, not a
-> switchable transport feature. Our client negotiates classic, so none of it applies
-> to the client leg today. → [`serializer-selection.md`](docs/discoveries/serializer-selection.md)
-> · [role state machines](docs/role-state-machines.md)
+> **2026-08-23 — SAP's fast RFC serialization is no longer opaque.** The record
+> grammar is tag-dependent and now read: `char`, `INT4`, `STRING` and the padded
+> forms, each with its own framing. Behind a `\TYPE=` descriptor sits a
+> **field-description list** whose single-byte **DDIC type codes** are
+> cross-checked field for field against the live system — including the detail
+> that trips a decoder in half: **`CHAR` widths count UTF-16 units while `RAW`
+> counts bytes**, so `CHAR(50)` travels as 100 and `RAW(3)` as 3. `0x5001` turned
+> out not to be a container at all but one id of an item grammar that closes with
+> a repeat of its own tag. And payloads above 512 bytes are **LZ4** — the
+> published block format, verified against every compressed block in our captures,
+> each located by the eight-byte header that declares both sizes. Structures only
+> ever travel compressed here, so the type table came out of a frame that was
+> unreadable the day before. → [`serializer-selection.md`](docs/discoveries/serializer-selection.md)
 
 > **Before that** — 
+> [**2026-08-22** · all four serializers selectable, and what each puts on the wire](BANNERS.md#2026-08-22-the-serializers-mapped-and-the-fast-one-decoded) · 
 > [**2026-08-20** · call any function module, and expose it to an assistant as MCP tools](BANNERS.md#2026-08-20-call-any-sap-function-module-from-go-the-shell-or-as-mcp-tools) · 
 > [**2026-08-19** · both directions live against real SAP, zero SAP libraries](BANNERS.md#2026-08-19-both-directions-live-against-real-sap-with-zero-sap-libraries) · 
 > every headline this project has run: [`BANNERS.md`](BANNERS.md)
 
-> ⚠️ **Research preview — `v0.1.0`.** A tagged preview, not a stable API: `0.x`
+> ⚠️ **Research preview — `v0.2.0`.** A tagged preview, not a stable API: `0.x`
 > means it may move under you, and there is no support boundary. Classic
 > RFC has no transport encryption — don't send credentials across an untrusted
 > network ([`SECURITY.md`](SECURITY.md)). Don't depend on it yet.
@@ -252,7 +254,7 @@ system it is strictly more capable.
 | **Tooling** | live: a `orfc` CLI (`info`/`describe`/`search`/`call`/`read-table`/`ping`) and an MCP server (`orfc mcp`, stdio) — `describe <FM>` emits an MCP-tool JSON Schema, generic `call` runs any FM (JSON args, coerced per interface), and **`--expose`/`--hide` masks auto-generate real per-FM MCP tools** (with `outputSchema` + read-only/destructive hints; `--safe` blocks write FMs). Config via `.rfc.json` + env + flags. Dependency-free, extractable subproject |
 | **Debugger** | ✅ the ABAP debugger driven end to end over classic RFC on a pinned session (`Client.Pin`) — **including SAP's own ADT debugger resources, with nothing installed on the server**: listen, attach, step, stack, live-verified against A4H |
 | **Callback** | ✅ server→client RFC callbacks (DESTINATION 'BACK') — register `Destination.Callbacks`; live-verified |
-| **Serialization** | all four modes selectable on demand; the fast serializer's record grammar decoded (tags, widths, the 512-byte compression threshold) — decoded, not yet produced |
+| **Serialization** | all four modes selectable on demand. The **fast serializer is decoded**: record grammar, field lists with DDIC-verified type codes, the item grammar, and LZ4 above 512 bytes located by its size header. Decode only — we do not yet produce fast |
 | **Next** | per-FM `outputSchema` + HTTP transport for `orfc mcp`; write-FM safety gate ([design](docs/design/write-fm-safety.md)); finish the generating server |
 
 Full history: [`CHANGELOG.md`](CHANGELOG.md); the ranked plan: [`docs/roadmap.md`](docs/roadmap.md).
