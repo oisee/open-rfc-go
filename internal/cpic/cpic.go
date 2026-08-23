@@ -43,27 +43,27 @@ const (
 type Tag uint16
 
 const (
-	TagDestination      Tag = 0x0006
-	TagClientAddress    Tag = 0x0007
-	TagPartnerHost      Tag = 0x0008
-	TagKernel           Tag = 0x000b
-	TagConnectionType   Tag = 0x0011
-	TagKernelRelease    Tag = 0x0012
-	TagKernelPatch      Tag = 0x0013
-	TagPartnerSystem    Tag = 0x0018
-	TagSystemCodePage   Tag = 0x0016
-	TagStart            Tag = 0x0101
-	TagFunction         Tag = 0x0102
-	TagProtocolVersion  Tag = 0x0103
-	TagCapabilities     Tag = 0x0106
-	TagUser             Tag = 0x0111
-	TagClient           Tag = 0x0114
-	TagLanguage         Tag = 0x0115
-	TagPassword         Tag = 0x0117
+	TagDestination     Tag = 0x0006
+	TagClientAddress   Tag = 0x0007
+	TagPartnerHost     Tag = 0x0008
+	TagKernel          Tag = 0x000b
+	TagConnectionType  Tag = 0x0011
+	TagKernelRelease   Tag = 0x0012
+	TagKernelPatch     Tag = 0x0013
+	TagPartnerSystem   Tag = 0x0018
+	TagSystemCodePage  Tag = 0x0016
+	TagStart           Tag = 0x0101
+	TagFunction        Tag = 0x0102
+	TagProtocolVersion Tag = 0x0103
+	TagCapabilities    Tag = 0x0106
+	TagUser            Tag = 0x0111
+	TagClient          Tag = 0x0114
+	TagLanguage        Tag = 0x0115
+	TagPassword        Tag = 0x0117
 	// TagTicket carries an SAP logon ticket in place of a password. The value is
 	// the ticket's base64 text (the MYSAPSSO2 string) encoded UTF-16LE. Derived
 	// clean-room from our own capture; see docs/discoveries.
-	TagTicket Tag = 0x0670
+	TagTicket           Tag = 0x0670
 	TagProgram          Tag = 0x0130
 	TagLogonStatus      Tag = 0x0161
 	TagParameterName    Tag = 0x0201
