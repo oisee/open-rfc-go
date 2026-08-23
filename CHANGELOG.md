@@ -5,6 +5,84 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 [`docs/discoveries/`](docs/discoveries/); the porting plan is in
 [`docs/porting-plan.md`](docs/porting-plan.md).
 
+## v0.2.0 — the fast serializer, decoded — 2026-08-23
+
+SAP's fast RFC serialization stops being opaque. What was a wall of bytes a day
+ago is now a grammar with tests against live captures.
+
+### The record grammar
+
+Tag-dependent — there is no single length rule:
+
+```
+0x43 'C' char        <len:1> 0x80 <len bytes>   one byte per char, not UTF-16
+0x4e 'N' int4        <4 bytes> little-endian    fixed width, no length
+0x50 'P' descriptor  <len:1> "\TYPE=..."
+0x30 '0' padded      <len:2 BE> <value>
+0x53 'S' STRING      <0xC000|len:LE16> <len:LE16> <value>
+0x45 'E' end         no value
+```
+
+### The field-description list, and the type codes
+
+Behind a descriptor sits a list, not more records:
+
+```
+0x44 'D' <fieldcount:1>  0x50 'P' <len> "\TYPE=..."
+then fieldcount times:   <typecode:1> [<width:2 LE>] <namelen:1> <NAME>
+```
+
+The type codes are cross-checked field for field against the live system's DDIC
+using `RFCTEST`, which carries a spread of them in one announcement: `0x01` INT1,
+`0x02` INT2, `0x03` INT4, `0x06` CHAR, `0x0c` DATS, `0x0e` TIMS, `0x13` FLTP,
+`0x17` RAW, `0x18` STRING, `0x19` XSTRING.
+
+**Two width conventions, and they differ.** `CHAR` counts UTF-16 units, so
+`CHAR(50)` travels as 100; `RAW` counts bytes, so `RAW(3)` travels as 3. Both sit
+in that one structure. A decoder that doubles everything gets every hex field
+wrong by a factor of two.
+
+The field count is a usable checksum: over 434 descriptors the recovered list
+length matches exactly, with every mismatch in a compressed frame and none below
+the threshold.
+
+### `0x5001` is not a container
+
+It is one id of a general item grammar, `<id:2 BE> <len:2 BE> <data> <id:2 BE>`,
+where the id repeats as a closing tag. That also explains a puzzle that stalled an
+earlier pass: scanning a frame for `0x5001` finds every item twice, and reading a
+closing tag as an opening one takes the next item's id for a length.
+
+### The compression is LZ4
+
+The published block format, above 512 bytes of payload, intrinsic to the
+serializer — SM59's "Deactivate RFC Compression" does nothing to it. Blocks are
+located by eight bytes immediately before them carrying both sizes, and every
+compressed block in the captures decodes to exactly its declared uncompressed size
+while consuming exactly its declared compressed size.
+
+This supersedes the earlier note that decompression would be a substantial
+separate project. It also unlocked the type table above: structures never travel
+below the threshold here, so that field list was unreadable until the decoder
+existed.
+
+### How it was found, and four readings that were wrong
+
+Controlled differentials — vary one parameter, hold everything else, capture both
+ends. Byte archaeology on large frames failed at the same questions this answered
+in minutes.
+
+Then adversarial review: independent agents assigned to *refute* each claim
+against the whole corpus. Every wrong reading fit the samples that had been
+looked at, and each was killed by a frame nobody had opened. Four are recorded in
+`docs/discoveries/serializer-selection.md` so they are not rediscovered:
+byte-stepping resynchronisation, `0x03` as a "name tag", a width reading
+"refuted" by a probe whose declarations never reached the wire, and guessing a
+block's length when LZ4's final sequence makes several wrong lengths look valid.
+
+Decode only. We do not yet produce fast serialization, and the client negotiates
+classic, so none of this is on the client's critical path today.
+
 ## v0.1.0 — first tagged preview — 2026-08-22
 
 The first version with a name and a number. Still a research preview: `0.x` means
