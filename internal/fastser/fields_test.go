@@ -111,3 +111,90 @@ func TestWidthOperandOnlyForWidthParameterisedCodes(t *testing.T) {
 		t.Errorf("name = %q, want TABLE_LINE", p.Fields[0].Name)
 	}
 }
+
+// rfctestParameter is the RFCTEST parameter announcement exactly as it appears
+// on the wire, recovered from a live STFC_STRUCTURE response by decompressing
+// its LZ4 block. Structures only ever travel in compressed frames here, so this
+// content was unreachable until DecompressBlock existed.
+const rfctestParameter = "440c500d5c545950453d524643544553541308524643464c4f41540602000852464343" +
+	"484152310207524643494e54320107524643494e543106080008524643434841523403" +
+	"07524643494e543417030007524643484558330604000852464343484152320e075246" +
+	"4354494d450c0752464344415445066400085246434441544131066400085246434441" +
+	"544132"
+
+// rfctestDDIC is what SE11 says RFCTEST is, queried from the live system. The
+// wire has to agree with it field for field — this is the cross-check that
+// settles both the type codes and the two width conventions.
+var rfctestDDIC = []struct {
+	name  string
+	code  byte
+	width int // 0 = the code implies the width and carries no operand
+}{
+	{"RFCFLOAT", TypeFloat, 0},
+	{"RFCCHAR1", TypeChar, 2}, // CHAR(1), UTF-16 units
+	{"RFCINT2", TypeInt2, 0},
+	{"RFCINT1", TypeInt1, 0},
+	{"RFCCHAR4", TypeChar, 8}, // CHAR(4)
+	{"RFCINT4", TypeInt4, 0},
+	{"RFCHEX3", TypeRaw, 3},   // RAW(3) — bytes, NOT doubled
+	{"RFCCHAR2", TypeChar, 4}, // CHAR(2)
+	{"RFCTIME", TypeTims, 0},
+	{"RFCDATE", TypeDats, 0},
+	{"RFCDATA1", TypeChar, 100}, // CHAR(50)
+	{"RFCDATA2", TypeChar, 100}, // CHAR(50)
+}
+
+func TestRealStructureAgreesWithDDIC(t *testing.T) {
+	p, _, ok := DecodeParameter(mustHex(t, rfctestParameter), 0)
+	if !ok {
+		t.Fatal("the captured RFCTEST announcement did not decode")
+	}
+	if p.TypeName != "RFCTEST" {
+		t.Fatalf("TypeName = %q, want RFCTEST", p.TypeName)
+	}
+	if p.Generated() {
+		t.Error("RFCTEST is a real DDIC type, not one the serializer synthesised")
+	}
+	if len(p.Fields) != len(rfctestDDIC) {
+		t.Fatalf("got %d fields, want %d", len(p.Fields), len(rfctestDDIC))
+	}
+	for i, want := range rfctestDDIC {
+		got := p.Fields[i]
+		if got.Name != want.name {
+			t.Errorf("field %d: name = %q, want %q", i, got.Name, want.name)
+			continue
+		}
+		if got.TypeCode != want.code {
+			t.Errorf("%s: type code = %#x, want %#x", want.name, got.TypeCode, want.code)
+		}
+		if want.width == 0 {
+			if got.HasWidth {
+				t.Errorf("%s: carries a width operand (%d); its code implies the width", want.name, got.Width)
+			}
+			continue
+		}
+		if !got.HasWidth || got.Width != want.width {
+			t.Errorf("%s: width = %d (present=%v), want %d", want.name, got.Width, got.HasWidth, want.width)
+		}
+	}
+}
+
+func TestRawWidthCountsBytesAndCharWidthCountsUnits(t *testing.T) {
+	// The pair that separates the two conventions, side by side in one structure:
+	// RAW(3) travels as 3 while CHAR(1) travels as 2. A decoder that doubles
+	// everything gets every hex field wrong by a factor of two.
+	p, _, ok := DecodeParameter(mustHex(t, rfctestParameter), 0)
+	if !ok {
+		t.Fatal("did not decode")
+	}
+	byName := map[string]Field{}
+	for _, f := range p.Fields {
+		byName[f.Name] = f
+	}
+	if got := byName["RFCHEX3"].Width; got != 3 {
+		t.Errorf("RFCHEX3 width = %d, want 3 — RAW counts bytes", got)
+	}
+	if got := byName["RFCCHAR1"].Width; got != 2 {
+		t.Errorf("RFCCHAR1 width = %d, want 2 — CHAR counts UTF-16 units", got)
+	}
+}

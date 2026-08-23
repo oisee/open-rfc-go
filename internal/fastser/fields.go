@@ -28,7 +28,7 @@ import "bytes"
 // than returning a plausible prefix.
 //
 // What the width operand measures: the declared width of the type named in the
-// descriptor, in bytes, counting UTF-16 units. That is not always the width the
+// descriptor — in UTF-16 units for CHAR, in plain bytes for RAW. That is not always the width the
 // ABAP programmer wrote. When a caller passes a value whose type the serializer
 // synthesises — the descriptor then names a generated `%_T…` type — the
 // generated type is sized to the value, so the width tracks the value. When the
@@ -36,7 +36,9 @@ import "bytes"
 // does not shrink it: `\TYPE=CHAR30` carries 60 whether four characters travel
 // or thirty. Both are the same rule read on different declarations.
 
-// ABAP type codes seen in a field description.
+// ABAP type codes, cross-checked field for field against the live system's DDIC
+// for RFCTEST — the structure that happens to carry a spread of them at once.
+// See fields_test.go, which decodes the real announcement and holds it to SE11.
 const (
 	TypeInt1    = 0x01
 	TypeInt2    = 0x02
@@ -50,6 +52,10 @@ const (
 	TypeXString = 0x19
 )
 
+// Two width conventions, and they differ: CHAR counts UTF-16 units, so CHAR(50)
+// travels as 100, while RAW counts bytes, so RAW(3) travels as 3. Both appear in
+// one RFCTEST announcement, which is what settles it.
+//
 // widthParameterised lists the type codes that carry a two-byte width operand.
 // The set is deliberately explicit rather than inferred: the captures show it is
 // not simply "the variable-length ones", and guessing here mis-aligns the whole

@@ -235,7 +235,38 @@ The bytes that sat between a type and its name are **one family: single-byte ABA
 type codes.** Observed: `0x01` INT1, `0x02` INT2, `0x03` INT4, `0x06` CHAR,
 `0x0c` DATS, `0x0e` TIMS, `0x13` FLTP, `0x17` RAW, `0x18` STRING, `0x19` XSTRING.
 A width-parameterised code carries a two-byte operand; one whose width follows
-from the code does not.
+from the code does not. The whole table is cross-checked against the live
+system's DDIC using `RFCTEST`, which carries a spread of types in one
+announcement:
+
+| field | code | width on the wire | DDIC |
+|---|---|---|---|
+| `RFCFLOAT` | `0x13` | — | FLTP(8) |
+| `RFCCHAR1` | `0x06` | 2 | CHAR(1) |
+| `RFCINT2` | `0x02` | — | INT2 |
+| `RFCINT1` | `0x01` | — | INT1 |
+| `RFCCHAR4` | `0x06` | 8 | CHAR(4) |
+| `RFCINT4` | `0x03` | — | INT4 |
+| `RFCHEX3` | `0x17` | **3** | RAW(3) |
+| `RFCCHAR2` | `0x06` | 4 | CHAR(2) |
+| `RFCTIME` | `0x0e` | — | TIMS |
+| `RFCDATE` | `0x0c` | — | DATS |
+| `RFCDATA1` | `0x06` | 100 | CHAR(50) |
+| `RFCDATA2` | `0x06` | 100 | CHAR(50) |
+
+**The two width conventions differ.** CHAR counts UTF-16 units, so CHAR(50)
+travels as 100; RAW counts bytes, so RAW(3) travels as 3. Both sit in that one
+structure, which is what settles it — a decoder that doubles everything gets
+every hex field wrong.
+
+That table came out of a **compressed** frame. Structures never travel below the
+512-byte threshold here, so none of it was readable until the LZ4 decoder existed.
+
+Scalar parameters are a different story: on the path this probe exercises the
+serializer normalises them. `NUMC`, `DATS`, `TIMS`, `FLTP`, `RAW` and `STRING`
+all arrive as a generated CHAR type, and `INT1`/`INT2`/`INT4` all collapse to
+`\TYPE=I` with code `0x03`. So the real codes are visible in structures, not in
+scalars — which is why an earlier sweep of scalar types found none of them.
 
 **`0x03` is not a name tag.** It was read as one here because it sat before the
 field name in every `INT4` capture. It is the type code for INT4, in the same slot
