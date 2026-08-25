@@ -647,6 +647,14 @@ func (s *Session) Close() error {
 // Authenticated reports whether the session has logged on.
 func (s *Session) Authenticated() bool { return s.authenticated }
 
+// Closed reports whether the conversation has ended — Close was called, or the
+// server deallocated it (APPC normal deallocation: a MESSAGE, short dump, or
+// auth refusal ends the conversation even when the reply itself decoded). A
+// closed session can never carry another call. The closed field is written only
+// while lifecycle.Managed holds its lock; read through Managed.SessionClosed
+// for the same guarantee.
+func (s *Session) Closed() bool { return s.closed }
+
 func equalBytes(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false

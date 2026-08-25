@@ -36,6 +36,9 @@ type Session interface {
 	CallRaw(ctx context.Context, request []byte) (client.CallResult, error)
 	CallWithCallbacks(ctx context.Context, request []byte, onCallback client.CallbackHandler) (client.CallResult, error)
 	Authenticated() bool
+	// Closed reports whether the conversation has ended, locally or by a
+	// server-side deallocation delivered inside an otherwise normal reply.
+	Closed() bool
 	Close() error
 }
 
@@ -97,6 +100,17 @@ func (m *Managed) Ping(ctx context.Context) error {
 	}
 	_, err := m.sess.Call(ctx, PingFunction, nil, nil)
 	return err
+}
+
+// SessionClosed reports whether the underlying conversation has ended — via
+// Close, or by a server-side deallocation that arrived with a normal reply
+// (a MESSAGE, short dump, or auth refusal deallocates on the way out). A
+// closed conversation can never carry another call: pool users must Discard
+// the session instead of releasing it for reuse.
+func (m *Managed) SessionClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed || m.sess.Closed()
 }
 
 // Authenticated reports whether the underlying session has logged on.

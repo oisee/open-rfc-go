@@ -69,7 +69,12 @@ func (c *Client) Call(ctx context.Context, functionName string, in Params) (Resu
 	}
 	defer lease.Release()
 	res, err := c.callOn(ctx, lease.Value(), functionName, in)
-	if err != nil && errors.Is(err, ErrTransport) {
+	// A broken transport and a server-side deallocation both end the
+	// conversation — the latter even when the call returned a result or a
+	// clean *ABAPException (a MESSAGE, short dump, or auth refusal
+	// deallocates on the way out). Either way the connection can never carry
+	// another call: discard it so it does not re-enter the pool.
+	if (err != nil && errors.Is(err, ErrTransport)) || lease.Value().SessionClosed() {
 		lease.Discard()
 	}
 	return res, err
@@ -89,7 +94,10 @@ func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionNa
 	// structure or a table type) cannot be modelled by the flat resolver; they
 	// travel on the recursive xRFC codec against an RFC_METADATA_GET type graph.
 	// plan is nil — and nothing changes — for a purely flat interface.
-	plan := c.planLayoutOn(ctx, sess, iface, resolve)
+	plan, err := c.planLayoutOn(ctx, sess, iface, resolve)
+	if err != nil {
+		return Result{}, err
+	}
 	in, err = coerceParams(iface, in, resolve, plan)
 	if err != nil {
 		return Result{}, err
@@ -104,7 +112,7 @@ func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionNa
 	}
 	res, err := sess.CallWithCallbacks(ctx, req, c.callbackHandler(ctx))
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %v", ErrTransport, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrTransport, err)
 	}
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return Result{}, exc

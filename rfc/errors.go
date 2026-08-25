@@ -44,11 +44,11 @@ func translate(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, pool.ErrPoolExhausted):
-		return fmt.Errorf("%w: %v", ErrPoolExhausted, err)
+		return fmt.Errorf("%w: %w", ErrPoolExhausted, err)
 	case errors.Is(err, pool.ErrClosed), errors.Is(err, lifecycle.ErrClosed), errors.Is(err, transport.ErrClosed):
-		return fmt.Errorf("%w: %v", ErrClosed, err)
+		return fmt.Errorf("%w: %w", ErrClosed, err)
 	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("%w: %v", ErrTimeout, err)
+		return fmt.Errorf("%w: %w", ErrTimeout, err)
 	case errors.Is(err, context.Canceled):
 		return err
 	}
