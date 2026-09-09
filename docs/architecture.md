@@ -20,7 +20,7 @@ rfc (public API)
   └── internal/metadata ── internal/value
         └── internal/{gateway,msgserver}
               └── internal/{appc,cpic,rfcpro}
-                    └── internal/ni
+                    └── ni
                           └── internal/transport (net.Conn)
 ```
 
@@ -30,7 +30,7 @@ rfc (public API)
 | Destination, pool, lifecycle | `internal/destination`, `internal/pool` | `src/destination/`, `src/pool/`, `src/lifecycle/` |
 | Metadata repository | `internal/metadata` | `src/metadata/` |
 | Value serialization | `internal/value` | `src/values/` |
-| APPC/CPIC conversation, NI framing | `internal/appc`, `internal/cpic`, `internal/rfcpro`, `internal/gateway`, `internal/msgserver`, `internal/ni` | `src/protocol/` |
+| APPC/CPIC conversation, NI framing | `internal/appc`, `internal/cpic`, `internal/rfcpro`, `internal/gateway`, `internal/msgserver`, `ni` | `src/protocol/` |
 | Transport | `internal/transport` | `src/transport/` |
 
 **Upward layers consume semantic results. Downward layers never know about

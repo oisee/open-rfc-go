@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oisee/open-rfc-go/internal/ni"
+	"github.com/oisee/open-rfc-go/ni"
 )
 
 type niVectorFile struct {

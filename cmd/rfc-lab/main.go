@@ -30,11 +30,11 @@ import (
 
 	"github.com/oisee/open-rfc-go/internal/bridge"
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
-	"github.com/oisee/open-rfc-go/internal/sniffer"
+	"github.com/oisee/open-rfc-go/sniffer"
 )
 
 func main() {
-	targetHost := flag.String("target-host", "192.168.8.103", "real SAP host the sniffer forwards to")
+	targetHost := flag.String("target-host", "127.0.0.1", "real SAP host the sniffer forwards to")
 	dump := flag.String("dump", "cap-lab.jsonl", "capture file for the sniffer (tagged JSONL)")
 	dumpMax := flag.Int("dump-max", 0, "cap hex bytes per frame (0 = whole payload)")
 	flag.Parse()
