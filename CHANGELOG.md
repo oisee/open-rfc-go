@@ -5,6 +5,14 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 [`docs/discoveries/`](docs/discoveries/); the porting plan is in
 [`docs/porting-plan.md`](docs/porting-plan.md).
 
+## Unreleased
+
+- `ni`, `wire` and `sniffer` are public packages now, moved out of `internal/`.
+  They are the NI framing, the bounds-checked byte reader/writer and the
+  framing-aware proxy, and a second protocol on the same transport — DIAG,
+  in open-diag-go-pro — wants all three. Import paths change from
+  `internal/ni` to `ni`, and likewise for the other two; nothing else does.
+
 ## Client — ADT REST over classic RFC — 2026-08-21
 
 A real ADT REST request now travels through the classic-RFC tunnel:

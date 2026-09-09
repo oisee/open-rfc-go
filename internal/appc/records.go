@@ -7,7 +7,7 @@ package appc
 import (
 	"fmt"
 
-	"github.com/oisee/open-rfc-go/internal/wire"
+	"github.com/oisee/open-rfc-go/wire"
 )
 
 // RecordHeaderInput carries the optional common-header overrides. A nil field

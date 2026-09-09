@@ -21,7 +21,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/oisee/open-rfc-go/internal/ni"
+	"github.com/oisee/open-rfc-go/ni"
 	"github.com/oisee/open-rfc-go/internal/saprouter"
 )
 

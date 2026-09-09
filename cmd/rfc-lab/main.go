@@ -30,7 +30,7 @@ import (
 
 	"github.com/oisee/open-rfc-go/internal/bridge"
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
-	"github.com/oisee/open-rfc-go/internal/sniffer"
+	"github.com/oisee/open-rfc-go/sniffer"
 )
 
 func main() {
