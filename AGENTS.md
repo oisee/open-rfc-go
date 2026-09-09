@@ -59,7 +59,7 @@ go vet ./...
 Run the fuzz targets when touching a decoder:
 
 ```sh
-go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
+go test ./ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
 ```
 
 Linting is currently `gofmt` plus `go vet`. Adding `golangci-lint` with a

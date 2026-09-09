@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/oisee/open-rfc-go/internal/gateway"
-	"github.com/oisee/open-rfc-go/internal/ni"
+	"github.com/oisee/open-rfc-go/ni"
 )
 
 // Direction is which way an observed frame travels.

@@ -72,7 +72,7 @@ longer know where the next record starts.
 **A partial record can hold credentials.** Retained buffers are zeroed on reset.
 In Go that is weaker than it looks; see [`../SECURITY.md`](../SECURITY.md).
 
-Ported as `internal/ni`. Vectors: `conformance/testdata/vectors/ni-framing.v1.json`.
+Ported as `ni`. Vectors: `conformance/testdata/vectors/ni-framing.v1.json`.
 
 ---
 
