@@ -2,6 +2,12 @@
 
 This guide applies to maintainers, contributors, and automated coding agents.
 
+> **Shared knowledge base:** [`../sap-kb/`](../sap-kb/) maps this repo against its
+> SAP-protocol siblings (vsp, open-diag-go-pro, sap-sso-trace). This repo owns the
+> NI transport, the RFC handshake, the sniffer and the RFC client/server; its
+> chapter is [`../sap-kb/repos/open-rfc-go.md`](../sap-kb/repos/open-rfc-go.md) and
+> the cross-repo backlog is [`../sap-kb/backlog.md`](../sap-kb/backlog.md).
+
 This repository is a **port** of [`open-rfc`](https://github.com/marianfoo/open-rfc),
 not an independent implementation. That fact changes how you work here.
 
