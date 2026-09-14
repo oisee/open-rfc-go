@@ -19,7 +19,7 @@ func TestEncodeResponseClientReadsSuccess(t *testing.T) {
 	}
 	tables := []Table{{Name: "RFCTABLE", RowByteLength: 4, Rows: [][]byte{{1, 2, 3, 4}}}}
 
-	payload, err := EncodeCutFunctionResponse(exports, tables)
+	payload, err := EncodeCutFunctionResponse(exports, tables, nil)
 	if err != nil {
 		t.Fatalf("encode response: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestFullCUTRoundTrip(t *testing.T) {
 		t.Fatalf("server saw unexpected request: %+v", req)
 	}
 	response, err := EncodeCutFunctionResponse(
-		[]cpic.NamedValue{{Name: "ECHOTEXT", Value: req.Imports[0].Value}}, nil)
+		[]cpic.NamedValue{{Name: "ECHOTEXT", Value: req.Imports[0].Value}}, nil, nil)
 	if err != nil {
 		t.Fatalf("server encode response: %v", err)
 	}

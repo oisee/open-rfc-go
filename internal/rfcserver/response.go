@@ -18,10 +18,35 @@ import (
 
 var cutResponsePrefix = []byte{0x05, 0x00, 0x00, 0x00}
 
+// The xRFC parameters of a response, framed the way a request frames them.
+//
+// A recursive parameter does not travel as a scalar: it is XML between two
+// empty 0x3c02 boundaries, split into 0x3c05 chunks. The name is not on the
+// wire at all — it is the root element of that XML — which is why nothing here
+// encodes it, and why a reader has to look inside to know what it was given.
+func xrfcResponseFields(parameters []cpic.NamedValue) ([]cpic.Field, error) {
+	var fields []cpic.Field
+	for _, parameter := range parameters {
+		if len(parameter.Value) == 0 {
+			return nil, fmt.Errorf("%w: %s xRFC XML value must not be empty", ErrRequest, parameter.Name)
+		}
+		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagXRfcParameter), Value: nil})
+		for offset := 0; offset < len(parameter.Value); offset += cpic.ClassicXrfcXMLChunkLength {
+			end := offset + cpic.ClassicXrfcXMLChunkLength
+			if end > len(parameter.Value) {
+				end = len(parameter.Value)
+			}
+			fields = append(fields, cpic.Field{Tag: uint16(cpic.TagXRfcData), Value: append([]byte(nil), parameter.Value[offset:end]...)})
+		}
+		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagXRfcParameter), Value: nil})
+	}
+	return fields, nil
+}
+
 // EncodeCutFunctionResponse encodes a successful CUT response carrying the given
 // export scalars and tables. Scalar/table names travel as UTF-16LE; the zero
 // 0x0420 control marks success.
-func EncodeCutFunctionResponse(exports []cpic.NamedValue, tables []Table) ([]byte, error) {
+func EncodeCutFunctionResponse(exports []cpic.NamedValue, tables []Table, xrfcParameters []cpic.NamedValue) ([]byte, error) {
 	fields := []cpic.Field{
 		{Tag: 0x0420, Value: []byte{0, 0, 0, 0}}, // zero success control
 	}
@@ -54,6 +79,11 @@ func EncodeCutFunctionResponse(exports []cpic.NamedValue, tables []Table) ([]byt
 			fields = append(fields, cpic.Field{Tag: uint16(cpic.TagTableCompr), Value: append([]byte(nil), row...)})
 		}
 	}
+	xrfcFields, err := xrfcResponseFields(xrfcParameters)
+	if err != nil {
+		return nil, err
+	}
+	fields = append(fields, xrfcFields...)
 	fields = append(fields, cpic.Field{Tag: uint16(cpic.TagEnd), Value: nil})
 
 	chain, err := cpic.EncodeFieldChain(uint16(cpic.TagResponseStart), fields, cpic.FieldChainLimits{})
@@ -74,7 +104,7 @@ func EncodeCutFunctionResponse(exports []cpic.NamedValue, tables []Table) ([]byt
 // (0x0512), an echo of the requested outputs (0x0205), then the export scalars
 // and tables. guid is the client's connection GUID (init byte order); pass nil
 // to omit it.
-func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, guid []byte, requestedOutputs []string) ([]byte, error) {
+func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, xrfcParameters []cpic.NamedValue, guid []byte, requestedOutputs []string) ([]byte, error) {
 	fields := []cpic.Field{{Tag: uint16(cpic.TagResponseContext), Value: nil}}
 	if len(guid) == 16 {
 		fields = append(fields, cpic.Field{Tag: uint16(cpic.TagSession), Value: swapRFCGUID(guid)})
@@ -114,6 +144,11 @@ func EncodeCutFunctionResponseS4(exports []cpic.NamedValue, tables []Table, guid
 			fields = append(fields, cpic.Field{Tag: uint16(cpic.TagTableCompr), Value: append([]byte(nil), row...)})
 		}
 	}
+	xrfcFields, err := xrfcResponseFields(xrfcParameters)
+	if err != nil {
+		return nil, err
+	}
+	fields = append(fields, xrfcFields...)
 	// Trailing S4 envelope: program name, control metric, S4 metadata block.
 	program, err := classicrfc.EncodeAbapChar("OPEN_RFC_GO", 40)
 	if err != nil {

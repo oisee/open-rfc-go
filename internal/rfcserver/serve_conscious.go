@@ -119,7 +119,7 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				respCUT, werr = EncodeCutFunctionExceptionResponse(excKey)
 				log(fmt.Sprintf("SESSION: %s -> exception %s", fn, excKey))
 			} else {
-				respCUT, werr = EncodeCutFunctionResponseS4(resp.Exports, resp.Tables, guid, req.RequestedOutputs)
+				respCUT, werr = EncodeCutFunctionResponseS4(resp.Exports, resp.Tables, resp.XrfcParameters, guid, req.RequestedOutputs)
 				log(fmt.Sprintf("SESSION: %s -> generated (%d exports, %d tables)", fn, len(resp.Exports), len(resp.Tables)))
 			}
 			if werr != nil {

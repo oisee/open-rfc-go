@@ -19,6 +19,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/oisee/open-rfc-go/internal/cpic"
+	"github.com/oisee/open-rfc-go/internal/xrfc"
 )
 
 // ErrRequest reports a malformed inbound CUT request.
@@ -100,12 +101,28 @@ func DecodeCutFunctionRequest(payload []byte) (Request, error) {
 			cur.Rows = append(cur.Rows, append([]byte(nil), f.Value...))
 		case cpic.TagXRfcParameter:
 			if haveXrfc {
-				// second boundary closes the parameter
-				req.XrfcParameters = append(req.XrfcParameters, cpic.NamedValue{Name: pendingXrfc, Value: pendingXrfcData})
+				// The closing boundary, and the first moment the name can be
+				// known. EncodeCutFunctionRequest writes both boundaries with
+				// no value at all, so the name never crosses the wire as a
+				// field: the only place it survives is the root element of
+				// the XML in between. Reading the boundary gives "" and a
+				// server then cannot tell one parameter from another, which
+				// starts to matter as soon as a function has two.
+				name, err := xrfc.DecodeRecursiveParameterName(pendingXrfcData, xrfc.RecursiveLimits{})
+				if err != nil {
+					return req, fmt.Errorf("%w: xRFC parameter name: %v", ErrRequest, err)
+				}
+				if pendingXrfc != "" && pendingXrfc != name {
+					return req, fmt.Errorf("%w: xRFC boundary names %q and the XML names %q",
+						ErrRequest, pendingXrfc, name)
+				}
+				req.XrfcParameters = append(req.XrfcParameters, cpic.NamedValue{Name: name, Value: pendingXrfcData})
 				haveXrfc = false
 				pendingXrfcData = nil
 			} else {
 				haveXrfc = true
+				// kept only to be checked against the XML: a boundary that
+				// does carry a name must not disagree with it
 				pendingXrfc = decodeUTF16LE(f.Value)
 			}
 		case cpic.TagXRfcData:

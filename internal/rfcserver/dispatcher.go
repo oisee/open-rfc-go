@@ -29,6 +29,10 @@ const SystemFailureKey = "SYSTEM_FAILURE"
 type Response struct {
 	Exports []cpic.NamedValue
 	Tables  []Table
+	// XrfcParameters are recursive parameters, each already encoded as xRFC
+	// XML. A function whose exports are structures of structures — ADT's REST
+	// endpoint is one — answers here and not in Exports.
+	XrfcParameters []cpic.NamedValue
 }
 
 // Exception is a handler error that raises a declared ABAP exception with Key.
@@ -87,7 +91,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestPayload []byte) ([]byt
 		}
 		return EncodeCutFunctionExceptionResponse(SystemFailureKey)
 	}
-	return EncodeCutFunctionResponse(resp.Exports, resp.Tables)
+	return EncodeCutFunctionResponse(resp.Exports, resp.Tables, resp.XrfcParameters)
 }
 
 // Invoke runs the handler for a decoded request and returns the structured

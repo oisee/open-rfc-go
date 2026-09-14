@@ -81,7 +81,7 @@ func (c *Client) callbackHandler(ctx context.Context) client.CallbackHandler {
 		for name, val := range resp.Exports {
 			exports = append(exports, cpic.NamedValue{Name: name, Value: val})
 		}
-		encoded, err := rfcserver.EncodeCutFunctionResponse(exports, nil)
+		encoded, err := rfcserver.EncodeCutFunctionResponse(exports, nil, nil)
 		if err != nil {
 			return nil, err
 		}
