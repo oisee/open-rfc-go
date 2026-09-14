@@ -19,6 +19,16 @@ const (
 	gatewayAckOffset2 = 55   // gateway reply: set to gatewayAckCaps
 	gatewayAckCaps    = 0xfb // client sends 0xcb; server acks capabilities with 0xfb
 
+	// The gateway answers with its own protocol level rather than echoing the
+	// client's. Measured over fourteen conversations captured between Eclipse
+	// ADT and an AS ABAP 1909 sandbox: a client offering "1100" (with 0x06 at
+	// gatewayAckOffset1) and a client offering "4103" (with 0x0e) were both
+	// answered "4103". Whether "4103" is that release's level or the same
+	// everywhere is not known from one system, which is why it is named for
+	// what it does rather than for what it might mean.
+	gatewayAckLevelOffset = 20
+	gatewayAckLevelText   = "4103"
+
 	cutReqTag0 = 0x05 // CUT request/response prefix byte 0
 	cutReqTag1 = 0x02 // CUT request prefix byte 1 (0x00 for a response)
 	cutRespT1  = 0x00 // CUT response prefix byte 1

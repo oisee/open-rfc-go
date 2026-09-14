@@ -55,6 +55,7 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			reply := append([]byte(nil), got...)
 			reply[gatewayAckOffset1] = gatewayAckLevel
 			reply[gatewayAckOffset2] = gatewayAckCaps
+			copy(reply[gatewayAckLevelOffset:], gatewayAckLevelText)
 			if send(reply) != nil {
 				return
 			}
