@@ -24,3 +24,7 @@ testdata/fuzz/
 
 # Research notes kept out of the public repo.
 .private/
+
+# Operational scratch: captures, credentials, anything with live identifiers.
+# Never tracked; see the leak scan.
+.local/

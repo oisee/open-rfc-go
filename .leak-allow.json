@@ -1,0 +1,300 @@
+{
+  "note": "Совпадения, на которые посмотрели и решили, что это не адрес. Каждому нужна причина: иначе список превращается в способ погасить проверку.",
+  "allow": [
+    {
+      "file": "internal/rfcserver/dispatcher_test.go",
+      "value": "192.168.158.119",
+      "reason": "Четыре байта внутри base64-вектора теста, а не адрес: байты вокруг не похожи ни на какую структуру с адресом, и вектор синтетический."
+    },
+    {
+      "file": "internal/scramble/scramble_test.go",
+      "value": "172.22.186.51",
+      "reason": "То же самое — выход скрамблера, байты псевдослучайны по построению."
+    },
+    {
+      "file": "internal/scramble/scramble_test.go",
+      "value": "172.22.138.193",
+      "reason": "То же самое, соседние четыре байта того же вектора."
+    },
+    {
+      "file": "internal/socks5/socks5_test.go",
+      "value": "10.0.0.1",
+      "reason": "Адрес в тесте SOCKS5, написанный как пример назначения. Не принадлежит ничьей сети."
+    },
+    {
+      "file": "docs/discoveries/0001-live-type3-server.md",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0001-live-type3-server.md",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0001-live-type3-server.md",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0001-live-type3-server.md",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0001-live-type3-server.md",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0002-wire-constants.md",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0002-wire-constants.md",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0002-wire-constants.md",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0002-wire-constants.md",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "docs/discoveries/0002-wire-constants.md",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "cmd/rfc-viewer/inspector.html",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "cmd/rfc-viewer/inspector.html",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "cmd/rfc-viewer/inspector.html",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "cmd/rfc-viewer/inspector.html",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "cmd/rfc-viewer/inspector.html",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/fastser/fastser_test.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/fastser/fastser_test.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/fastser/fastser_test.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/fastser/fastser_test.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/fastser/fastser_test.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/replay.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/replay.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/replay.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/replay.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/replay.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/s4_envelope.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/s4_envelope.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/s4_envelope.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/s4_envelope.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/s4_envelope.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_smart.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_smart.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_smart.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_smart.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_smart.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_ticketcatch_accept.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_ticketcatch_accept.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_ticketcatch_accept.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_ticketcatch_accept.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/rfcserver/serve_ticketcatch_accept.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/debugger-over-rfc.md",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/debugger-over-rfc.md",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/debugger-over-rfc.md",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/debugger-over-rfc.md",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/debugger-over-rfc.md",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/xbp-adaptive-scheduler.md",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/xbp-adaptive-scheduler.md",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/xbp-adaptive-scheduler.md",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/xbp-adaptive-scheduler.md",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "reports/xbp-adaptive-scheduler.md",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/metadata/recursive_test.go",
+      "value": "vhcala4hci",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/metadata/recursive_test.go",
+      "value": "vhcala4hci_A4H_00",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/metadata/recursive_test.go",
+      "value": "172.17.0.3",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/metadata/recursive_test.go",
+      "value": "172.17.0.17",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    },
+    {
+      "file": "internal/metadata/recursive_test.go",
+      "value": "172.22.138.222",
+      "reason": "Уже в публичном main с прежних коммитов. Решение Alice, 2026-09-14: оставить. vhcala4hci — штатное имя эплайенса ABAP Platform Developer Edition, опубликовано самим SAP; 172.17.0.3 — docker-мост, нероутируемый; CLAUDE — песочный юзер. Форс-пуш публичной истории дороже, чем эти три."
+    }
+  ]
+}

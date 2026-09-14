@@ -39,8 +39,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -58,6 +61,16 @@ func main() {
 	timeout := flag.Duration("timeout", 120*time.Second, "how long one backend request may take")
 	verbose := flag.Bool("verbose", false, "log every frame decision")
 	flag.Parse()
+
+	// Which binary this is, said out loud at startup.
+	//
+	// Restarting a service and wondering whether the new one is the one now
+	// running is a question that should not need answering twice, and during
+	// this bridge's first live session it was asked at nearly every step: a
+	// deploy, a test, an unchanged symptom, and no way to tell a fix that did
+	// not work from a fix that never shipped. The binary hashes itself, so the
+	// log says.
+	log.Printf("adt-rfc-bridge: build %s", ownBuildStamp())
 
 	target, err := rfcserver.LoadBackend(*config)
 	if err != nil {
@@ -114,6 +127,7 @@ func main() {
 			}
 			dispatcher := rfcserver.NewDispatcher()
 			dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
+			dispatcher.Identity = target.LogonIdentity()
 			logf := func(string) {}
 			if *verbose {
 				logf = func(s string) { log.Printf("adt-rfc-bridge: %s: %s", peer, s) }
@@ -132,4 +146,32 @@ func targetUser(b rfcserver.Backend) string {
 		return "an anonymous client"
 	}
 	return b.User
+}
+
+// ownBuildStamp is the first eight bytes of this executable's SHA-256, which
+// is enough to tell two builds apart and short enough to read off a log line.
+//
+// Unreadable executable, unknown stamp: worth saying rather than guessing,
+// because "unknown" is itself the answer to "is this the new one".
+func ownBuildStamp() string {
+	path, err := os.Executable()
+	if err != nil {
+		return "unknown"
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "unknown"
+	}
+	defer file.Close()
+
+	sum := sha256.New()
+	if _, err := io.Copy(sum, file); err != nil {
+		return "unknown"
+	}
+	stamp := hex.EncodeToString(sum.Sum(nil))[:16]
+
+	if info, err := file.Stat(); err == nil {
+		return fmt.Sprintf("%s (%s)", stamp, info.ModTime().Format("15:04:05"))
+	}
+	return stamp
 }

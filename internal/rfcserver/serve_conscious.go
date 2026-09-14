@@ -120,8 +120,9 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			// the conversation is already open, so the payload here is a CPIC
 			// logon rather than a call and has no CUT prefix. Told apart by
 			// that prefix rather than by length, which would be a guess.
-			if !hasCutRequestPrefix(got[80:]) {
-				accept, aerr := eclipseLogonAccept(got, convID, sequence)
+			if isEclipseLogon(got[80:]) {
+				log(fmt.Sprintf("LOGON: %d bytes", len(got)-80))
+				accept, aerr := eclipseLogonAccept(got, convID, sequence, d.Identity)
 				if aerr != nil {
 					log("LOGON: " + aerr.Error())
 					return
@@ -132,9 +133,13 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				log(fmt.Sprintf("LOGON: accepted (conv=%s)", string(convID)))
 				continue
 			}
-			req, derr := DecodeCutFunctionRequest(got[80:])
+			req, derr := DecodeFunctionRequest(got[80:])
 			if derr != nil {
-				log("SESSION: decode error: " + derr.Error())
+				// The head, because a decode error names the rule that failed
+				// and not the bytes that failed it, and the bytes are what
+				// says which framing this actually is.
+				log(fmt.Sprintf("SESSION: decode error: %v (%d bytes, head %x)",
+					derr, len(got)-80, got[80:min(len(got), 80+48)]))
 				return
 			}
 			fn := req.FunctionName
@@ -150,7 +155,10 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			}
 			var respCUT []byte
 			var werr error
-			if resp, excKey := d.Invoke(ctx, req); excKey != "" {
+			if resp, excKey, cause := d.Invoke(ctx, req); excKey != "" {
+				if cause != nil {
+					log(fmt.Sprintf("SESSION: %s -> %s: %v", req.FunctionName, excKey, cause))
+				}
 				respCUT, werr = EncodeCutFunctionExceptionResponse(excKey)
 				log(fmt.Sprintf("SESSION: %s -> exception %s", fn, excKey))
 			} else {

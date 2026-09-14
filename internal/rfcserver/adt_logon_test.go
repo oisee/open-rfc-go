@@ -21,7 +21,7 @@ func TestEclipseLogonAcceptPatchesOnlyItsFields(t *testing.T) {
 	convID := []byte("01234567")
 	sequence := [2]byte{0x00, 0x03}
 
-	reply, err := eclipseLogonAccept(request, convID, sequence)
+	reply, err := eclipseLogonAccept(request, convID, sequence, LogonIdentity{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEclipseLogonAcceptEchoesTheWholeSessionGUID(t *testing.T) {
 	request := make([]byte, 400)
 	copy(request[300:], append([]byte{0x05, 0x14, 0x00, 0x10}, guid...))
 
-	reply, err := eclipseLogonAccept(request, []byte("01234567"), [2]byte{})
+	reply, err := eclipseLogonAccept(request, []byte("01234567"), [2]byte{}, LogonIdentity{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestEclipseLogonAcceptEchoesTheWholeSessionGUID(t *testing.T) {
 // a partial one, because a truncated uuid is worse than a stale uuid: Eclipse
 // would report a mismatch it cannot act on.
 func TestEclipseLogonAcceptWithoutAGUIDPatchesNothing(t *testing.T) {
-	reply, err := eclipseLogonAccept(make([]byte, 400), []byte("01234567"), [2]byte{})
+	reply, err := eclipseLogonAccept(make([]byte, 400), []byte("01234567"), [2]byte{}, LogonIdentity{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestEclipseLogonAcceptWithoutAGUIDPatchesNothing(t *testing.T) {
 
 // A short request must not take the server down with it.
 func TestEclipseLogonAcceptSurvivesAShortRequest(t *testing.T) {
-	reply, err := eclipseLogonAccept(make([]byte, 90), []byte("00000001"), [2]byte{})
+	reply, err := eclipseLogonAccept(make([]byte, 90), []byte("00000001"), [2]byte{}, LogonIdentity{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

@@ -87,8 +87,54 @@ const (
 	logonAcceptGUIDLength  = 16
 )
 
+// Who the bridge says it is. Eclipse is configured with a system id before it
+// connects, and the logon answer carries one back; scrubbing the captured A4H
+// out of the template and leaving a hard-coded OSD in its place traded a leak
+// for a lie that happened to be visible — the uuid error gave way to
+// "Unexpected exception in logon operation" in the same step. So these come
+// from the bridge's own configuration, and the default is deliberately not a
+// real system's name.
+type LogonIdentity struct {
+	SystemID string // three characters, as every SAP system id is
+	Host     string
+	User     string
+	Client   string
+	Language string
+}
+
+// Fixed-width slots. The template's strings sit inside length-prefixed records
+// whose lengths are bytes elsewhere in the structure, so a value of a
+// different length would need those rebuilt; until something needs that, a
+// value is padded or cut to the width the template already has. A host name
+// longer than ten characters is therefore reported truncated rather than
+// wrong — visible, and not a protocol error.
+const (
+	logonSystemIDAt, logonSystemIDWidth = 146, 3
+	logonDescriptionAt, logonDescWidth  = 158, 10
+	logonHostAt, logonHostWidth         = 194, 10
+	logonInstanceAt, logonInstanceWidth = 406, 17
+	logonLogonStrAt, logonLogonStrWidth = 482, 17
+	logonUserAt, logonUserWidth         = 544, 12
+)
+
+// writeUTF16Field puts value into a fixed-width UTF-16LE slot, space-padded
+// the way the template pads its own.
+func writeUTF16Field(reply []byte, at, width int, value string) {
+	runes := []rune(value)
+	if len(runes) > width {
+		runes = runes[:width]
+	}
+	for len(runes) < width {
+		runes = append(runes, ' ')
+	}
+	for i, r := range runes {
+		reply[at+i*2] = byte(r)
+		reply[at+i*2+1] = byte(r >> 8)
+	}
+}
+
 // eclipseLogonAccept builds the answer to one logon out of the template.
-func eclipseLogonAccept(request, convID []byte, sequence [2]byte) ([]byte, error) {
+func eclipseLogonAccept(request, convID []byte, sequence [2]byte, who LogonIdentity) ([]byte, error) {
 	reply, err := hex.DecodeString(eclipseLogonAcceptHex)
 	if err != nil {
 		return nil, err
@@ -101,6 +147,16 @@ func eclipseLogonAccept(request, convID []byte, sequence [2]byte) ([]byte, error
 	reply[logonAcceptSeqSecond] = sequence[1]
 	if guid := sessionGUIDOf(request); guid != nil {
 		copy(reply[logonAcceptGUIDAt:], guid)
+	}
+
+	if who.SystemID != "" {
+		writeUTF16Field(reply, logonSystemIDAt, logonSystemIDWidth, who.SystemID)
+		writeUTF16Field(reply, logonDescriptionAt, logonDescWidth, who.SystemID+" BRIDGE")
+		writeUTF16Field(reply, logonHostAt, logonHostWidth, who.Host)
+		writeUTF16Field(reply, logonInstanceAt, logonInstanceWidth, who.Host+"_"+who.SystemID+"_00")
+		writeUTF16Field(reply, logonLogonStrAt, logonLogonStrWidth,
+			who.SystemID+"_"+who.Client+"_"+who.User+"_"+who.Language)
+		writeUTF16Field(reply, logonUserAt, logonUserWidth, who.User)
 	}
 	return reply, nil
 }

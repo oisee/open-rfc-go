@@ -49,6 +49,11 @@ type Handler func(ctx context.Context, req Request) (Response, error)
 type Dispatcher struct {
 	mu       sync.RWMutex
 	handlers map[string]Handler
+
+	// Identity is what the logon answer says this server is. Eclipse is
+	// configured with a system id before it connects and compares notes; see
+	// LogonIdentity. Zero means "leave the template alone".
+	Identity LogonIdentity
 }
 
 // NewDispatcher returns an empty dispatcher.
@@ -98,18 +103,25 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestPayload []byte) ([]byt
 // Response, or a non-empty exception key if the function is unknown or the
 // handler failed. It lets a server encode the reply itself (e.g. with the S4
 // envelope) instead of taking Dispatch's pre-encoded classic bytes.
-func (d *Dispatcher) Invoke(ctx context.Context, req Request) (Response, string) {
+//
+// The third return is the handler's own error, which the caller logs. It is
+// separate from the key because the key is what goes on the wire — SYSTEM_
+// FAILURE says only "something" to the client and, until this returned the
+// cause as well, it said only that to us too. A bridge whose backend refuses a
+// request, whose parameters fail to decode and whose response fails to encode
+// reported the same three words for all three.
+func (d *Dispatcher) Invoke(ctx context.Context, req Request) (Response, string, error) {
 	h, ok := d.handler(req.FunctionName)
 	if !ok {
-		return Response{}, UnknownFunctionKey
+		return Response{}, UnknownFunctionKey, nil
 	}
 	resp, err := h(ctx, req)
 	if err != nil {
 		var exc *Exception
 		if errors.As(err, &exc) && exc.Key != "" {
-			return Response{}, exc.Key
+			return Response{}, exc.Key, err
 		}
-		return Response{}, SystemFailureKey
+		return Response{}, SystemFailureKey, err
 	}
-	return resp, ""
+	return resp, "", nil
 }

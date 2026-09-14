@@ -32,6 +32,13 @@ type Backend struct {
 	Password string `json:"password"`
 	Client   string `json:"client"`
 	Language string `json:"language"`
+
+	// What the bridge calls itself in the logon answer. Eclipse is configured
+	// with a system id before it ever connects and does not take kindly to
+	// being told a different one, so this has to match the ABAP project's
+	// System ID rather than describe the backend.
+	SystemID string `json:"system_id"`
+	HostName string `json:"host_name"`
 }
 
 // LoadBackend reads a backend description from a JSON file. The environment
@@ -104,4 +111,33 @@ func (b Backend) origin() (*url.URL, error) {
 		return nil, fmt.Errorf("rfcserver: backend %q is not an origin such as http://host:port", b.URL)
 	}
 	return base, nil
+}
+
+// LogonIdentity is what the bridge tells Eclipse it is. The system id has to
+// match the one the ABAP project was configured with; the rest is description.
+//
+// The defaults name nothing real. A bridge that has not been told a system id
+// answers "OSD", which will not match anybody's project and will say so
+// immediately — better than a plausible name that fails later and elsewhere.
+func (b Backend) LogonIdentity() LogonIdentity {
+	who := LogonIdentity{
+		SystemID: b.SystemID,
+		Host:     b.HostName,
+		User:     b.User,
+		Client:   b.Client,
+		Language: b.Language,
+	}
+	if who.SystemID == "" {
+		who.SystemID = "OSD"
+	}
+	if who.Host == "" {
+		who.Host = "osd-bridge"
+	}
+	if who.Client == "" {
+		who.Client = "001"
+	}
+	if who.Language == "" {
+		who.Language = "en"
+	}
+	return who
 }
