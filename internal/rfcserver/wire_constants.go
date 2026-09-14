@@ -26,6 +26,33 @@ const (
 	// answered "4103". Whether "4103" is that release's level or the same
 	// everywhere is not known from one system, which is why it is named for
 	// what it does rather than for what it might mean.
+	// F_INITIALIZE, the APPC verb Eclipse opens a conversation with. The
+	// system answers with the client's own first eighty bytes and three
+	// changes, measured over eleven captured conversations: a level byte
+	// raised, a conversation id written where the client left spaces, and the
+	// client's own sequence counter copied over the 0xffff placeholder at the
+	// end. Everything else is echoed exactly.
+	appcInitLevelOffset = 21 // client sends 0x04, the system answers 0x06
+	appcInitLevelAck    = 0x06
+	appcInitConvOffset  = 40 // eight spaces in, eight ASCII digits out
+	appcInitConvLength  = 8
+	appcInitCounterFrom = 76 // the two bytes the system copies…
+	appcInitCounterTo   = 78 // …over the 0xffff it replaces
+	appcInitReplyLength = 80
+
+	// F_ALLOCATE, the verb that opens the conversation proper. Its reply is
+	// the request again with four changes, at the same eight offsets in all
+	// eleven captured conversations: two status bytes, the gateway's own
+	// protocol level written where the client left zeroes, and the sequence
+	// the client offered at F_INITIALIZE put back over the 0xffff placeholder.
+	appcAllocReplyLength = 80
+	appcAllocFlagOffset  = 16
+	appcAllocFlagValue   = 0x01
+	appcAllocStateOffset = 21
+	appcAllocStateValue  = 0x02
+	appcAllocLevelOffset = 69
+	appcAllocCounterAt   = 76
+
 	gatewayAckLevelOffset = 20
 	gatewayAckLevelText   = "4103"
 

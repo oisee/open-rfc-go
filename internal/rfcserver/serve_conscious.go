@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync/atomic"
 
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
@@ -40,6 +41,9 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 		return t.Send(b)
 	}
 	var convID, guid []byte
+	// the sequence the client offers at F_INITIALIZE and expects to see again
+	// when the conversation is allocated
+	var sequence [2]byte
 	pingStep := 0
 	for {
 		got, err := t.Receive(ctx)
@@ -60,6 +64,29 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				return
 			}
 			log("CONNECT: gateway acknowledged")
+		case len(got) >= appcInitReplyLength && got[0] == 0x06 && got[1] == 0x01: // APPC F_INITIALIZE
+			// The conversation id is ours to choose and the client uses it
+			// from here on, so it is kept rather than generated twice.
+			convID = newConversationID()
+			reply := append([]byte(nil), got[:appcInitReplyLength]...)
+			reply[appcInitLevelOffset] = appcInitLevelAck
+			copy(reply[appcInitConvOffset:appcInitConvOffset+appcInitConvLength], convID)
+			copy(sequence[:], got[appcInitCounterFrom:appcInitCounterFrom+2])
+			copy(reply[appcInitCounterTo:], sequence[:])
+			if send(reply) != nil {
+				return
+			}
+			log(fmt.Sprintf("INITIALIZE: conversation %s", string(convID)))
+		case len(got) == appcAllocReplyLength && got[0] == 0x06 && got[1] == 0x05: // APPC F_ALLOCATE
+			reply := append([]byte(nil), got...)
+			reply[appcAllocFlagOffset] = appcAllocFlagValue
+			reply[appcAllocStateOffset] = appcAllocStateValue
+			copy(reply[appcAllocLevelOffset:], gatewayAckLevelText)
+			copy(reply[appcAllocCounterAt:], sequence[:])
+			if send(reply) != nil {
+				return
+			}
+			log("ALLOCATE: conversation open")
 		case len(got) >= 48 && got[0] == 0x06 && got[1] == 0x03: // CPIC-init
 			convID = append([]byte(nil), got[40:48]...)
 			guid = findRFCGUID(got)
@@ -138,4 +165,15 @@ func DefaultDispatcher() *Dispatcher {
 		}}, nil
 	})
 	return d
+}
+
+// A conversation id: eight ASCII digits, which is the shape the system uses.
+// It only has to be unique within this server for as long as the client keeps
+// the conversation, so a counter is enough and is kinder to read in a log
+// than randomness would be.
+var conversationCounter atomic.Uint64
+
+func newConversationID() []byte {
+	n := conversationCounter.Add(1) % 100000000
+	return []byte(fmt.Sprintf("%08d", n))
 }

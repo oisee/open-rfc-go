@@ -88,10 +88,24 @@ func TestServeConsciousAnswersEclipseHandshake(t *testing.T) {
 				t.Fatalf("frame %d: the system answered %d bytes here and we answered nothing: %v",
 					at, len(payload), err)
 			}
+			// One field is ours to choose rather than to match: the
+			// conversation id the system writes into its F_INITIALIZE reply.
+			// It is masked out of the comparison and checked for its shape
+			// instead — eight ASCII digits — because a test that accepted
+			// anything there would also accept an empty one.
+			if isInitializeReply(payload) {
+				id := got[appcInitConvOffset : appcInitConvOffset+appcInitConvLength]
+				for _, c := range id {
+					if c < '0' || c > '9' {
+						t.Fatalf("frame %d: the conversation id is %q, not eight digits", at, id)
+					}
+				}
+				copy(got[appcInitConvOffset:], payload[appcInitConvOffset:appcInitConvOffset+appcInitConvLength])
+			}
 			if string(got) != string(payload) {
-				t.Fatalf("frame %d diverges.\n  system: %d bytes, %s…\n  ours:   %d bytes, %s…",
+				t.Fatalf("frame %d diverges.\n  system: %d bytes, %s…\n  ours:   %d bytes, %s…\n  first differing byte: %d",
 					at, len(payload), hex.EncodeToString(payload[:min(24, len(payload))]),
-					len(got), hex.EncodeToString(got[:min(24, len(got))]))
+					len(got), hex.EncodeToString(got[:min(24, len(got))]), firstDifference(payload, got))
 			}
 		default:
 			t.Fatalf("frame %d: unknown direction %q", at, frame.Dir)
@@ -125,4 +139,17 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func isInitializeReply(frame []byte) bool {
+	return len(frame) == appcInitReplyLength && frame[0] == 0x06 && frame[1] == 0x01
+}
+
+func firstDifference(a, b []byte) int {
+	for i := 0; i < min(len(a), len(b)); i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return min(len(a), len(b))
 }
