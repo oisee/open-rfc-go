@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -54,7 +55,27 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		return nil, err
 	}
 	if client == nil {
-		client = http.DefaultClient
+		// A jar, and one per handler.
+		//
+		// ADT keeps a stateful context and selects it with a sap-contextid
+		// cookie: lock, write, activate are three calls that must land in the
+		// same one. A client that forgets its cookies between calls turns that
+		// into three unrelated sessions and the write presents a handle whose
+		// session has gone.
+		//
+		// Per handler rather than per process because a conversation belongs to
+		// one caller. Two Eclipses sharing a jar would share a context, which
+		// is a data leak wearing the costume of a caching bug.
+		//
+		// The CSRF dance is deliberately not implemented here. Eclipse does it
+		// itself — it asks for a token and sends it back — and a bridge that
+		// joined in would be answering a question nobody asked. What a bridge
+		// must do is not get in the way: keep the cookies, keep the headers.
+		jar, err := cookiejar.New(nil)
+		if err != nil {
+			return nil, fmt.Errorf("rfcserver: cookie jar: %w", err)
+		}
+		client = &http.Client{Jar: jar}
 	}
 	graph := ADTRestGraph()
 

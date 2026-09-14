@@ -23,8 +23,19 @@
 // Two unknowns that would otherwise hide inside each other, separated by one
 // flag. Without it a failure means "something is wrong" and nothing more.
 //
-// The gateway is not encrypted and carries a logon, so point this at a sandbox
-// and at nothing else.
+// WHO MAY CALL THIS: anyone who can reach the port.
+//
+// The RFC side does not check the logon. It cannot usefully: the credentials
+// that matter are the ones the bridge itself presents to the backend, and they
+// are configured here rather than carried by the caller. So Eclipse may log on
+// with any user and any password, and every one of them reaches the backend as
+// whoever the configuration says.
+//
+// That is a deliberate choice and not an oversight, and it makes this an open
+// door: a port on a machine that speaks to a system, with no gate in front of
+// it. Bind it to a loopback or a trusted network, point it at a sandbox, and
+// do not leave it running. The gateway protocol is not encrypted either, so
+// what crosses it is readable to anything on the path.
 package main
 
 import (
@@ -33,6 +44,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"time"
 
@@ -60,12 +72,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	handler, err := rfcserver.ADTRestHandler(target, &http.Client{Timeout: *timeout})
-	if err != nil {
+	// One handler per connection, made below rather than here: it carries the
+	// cookie jar, and a jar shared between two clients would share an ADT
+	// context between them. Checked once at startup so a bad backend fails now
+	// rather than on somebody's first request.
+	if _, err := rfcserver.ADTRestHandler(target, nil); err != nil {
 		log.Fatalf("adt-rfc-bridge: %v", err)
 	}
-	dispatcher := rfcserver.NewDispatcher()
-	dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
 
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -74,6 +87,7 @@ func main() {
 	defer listener.Close()
 	log.Printf("adt-rfc-bridge: %s -> %s", *listen, target.Describe())
 	log.Printf("adt-rfc-bridge: point an ABAP project at this host, and at the instance this port belongs to")
+	log.Printf("adt-rfc-bridge: the RFC logon is NOT checked — every caller reaches the backend as %s", targetUser(target))
 
 	for {
 		conn, err := listener.Accept()
@@ -84,6 +98,22 @@ func main() {
 		go func() {
 			peer := conn.RemoteAddr().String()
 			log.Printf("adt-rfc-bridge: %s connected", peer)
+			// the jar is made here so the timeout can be set alongside it:
+			// both belong to this one conversation
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				log.Printf("adt-rfc-bridge: %s: %v", peer, err)
+				conn.Close()
+				return
+			}
+			handler, err := rfcserver.ADTRestHandler(target, &http.Client{Timeout: *timeout, Jar: jar})
+			if err != nil {
+				log.Printf("adt-rfc-bridge: %s: %v", peer, err)
+				conn.Close()
+				return
+			}
+			dispatcher := rfcserver.NewDispatcher()
+			dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
 			logf := func(string) {}
 			if *verbose {
 				logf = func(s string) { log.Printf("adt-rfc-bridge: %s: %s", peer, s) }
@@ -92,4 +122,14 @@ func main() {
 			log.Printf("adt-rfc-bridge: %s gone", peer)
 		}()
 	}
+}
+
+// targetUser names who the backend will think is calling, for the warning at
+// startup. A run that authenticates and one that does not should not look the
+// same in a log.
+func targetUser(b rfcserver.Backend) string {
+	if b.User == "" {
+		return "an anonymous client"
+	}
+	return b.User
 }
