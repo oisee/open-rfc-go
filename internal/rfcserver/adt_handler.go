@@ -48,10 +48,10 @@ var responseDescriptor = classicrfc.FunintParameter{
 
 // ADTRestHandler answers SADT_REST_RFC_ENDPOINT by making the request against
 // backend, which is an origin such as "http://localhost:8099".
-func ADTRestHandler(backend string, client *http.Client) (Handler, error) {
-	base, err := url.Parse(backend)
-	if err != nil || base.Scheme == "" || base.Host == "" {
-		return nil, fmt.Errorf("rfcserver: backend %q is not an origin such as http://host:port", backend)
+func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
+	base, err := backend.origin()
+	if err != nil {
+		return nil, err
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -71,6 +71,9 @@ func ADTRestHandler(backend string, client *http.Client) (Handler, error) {
 		if err != nil {
 			return Response{}, err
 		}
+		// who we are to the backend: the RFC logon authenticated the client to
+		// us, and the backend saw none of it
+		backend.apply(outgoing)
 		answer, err := client.Do(outgoing)
 		if err != nil {
 			return Response{}, fmt.Errorf("rfcserver: the backend did not answer: %w", err)

@@ -42,17 +42,25 @@ import (
 func main() {
 	listen := flag.String("listen", ":3300", "gateway address Eclipse connects to")
 	backend := flag.String("backend", "", "origin the ADT requests are made against, e.g. http://localhost:8099")
+	config := flag.String("config", "", "JSON file with the backend and its credentials; see -help")
 	timeout := flag.Duration("timeout", 120*time.Second, "how long one backend request may take")
 	verbose := flag.Bool("verbose", false, "log every frame decision")
 	flag.Parse()
 
-	if *backend == "" {
-		fmt.Fprintln(os.Stderr, "adt-rfc-bridge: --backend is required; there is nothing to forward to without it")
+	target, err := rfcserver.LoadBackend(*config)
+	if err != nil {
+		log.Fatalf("adt-rfc-bridge: %v", err)
+	}
+	if *backend != "" {
+		target.URL = *backend
+	}
+	if target.URL == "" {
+		fmt.Fprintln(os.Stderr, "adt-rfc-bridge: no backend; give --backend, or --config a file that names one")
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	handler, err := rfcserver.ADTRestHandler(*backend, &http.Client{Timeout: *timeout})
+	handler, err := rfcserver.ADTRestHandler(target, &http.Client{Timeout: *timeout})
 	if err != nil {
 		log.Fatalf("adt-rfc-bridge: %v", err)
 	}
@@ -64,7 +72,7 @@ func main() {
 		log.Fatalf("adt-rfc-bridge: %v", err)
 	}
 	defer listener.Close()
-	log.Printf("adt-rfc-bridge: %s -> %s", *listen, *backend)
+	log.Printf("adt-rfc-bridge: %s -> %s", *listen, target.Describe())
 	log.Printf("adt-rfc-bridge: point an ABAP project at this host, and at the instance this port belongs to")
 
 	for {

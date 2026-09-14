@@ -33,7 +33,7 @@ func TestADTRestHandlerCarriesTheExchange(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	handler, err := ADTRestHandler(backend.URL, backend.Client())
+	handler, err := ADTRestHandler(Backend{URL: backend.URL}, backend.Client())
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestADTRestHandlerCarriesTheExchange(t *testing.T) {
 
 // A call with nothing to make is refused rather than guessed at.
 func TestADTRestHandlerRefusesACallWithoutRequest(t *testing.T) {
-	handler, err := ADTRestHandler("http://127.0.0.1:1", nil)
+	handler, err := ADTRestHandler(Backend{URL: "http://127.0.0.1:1"}, nil)
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestADTRestHandlerRefusesACallWithoutRequest(t *testing.T) {
 }
 
 func TestADTRestHandlerRejectsABadBackend(t *testing.T) {
-	if _, err := ADTRestHandler("not-an-origin", nil); err == nil {
+	if _, err := ADTRestHandler(Backend{URL: "not-an-origin"}, nil); err == nil {
 		t.Fatal("a backend that is not an origin should be refused at construction")
 	}
 	_ = reflect.TypeOf(0)
