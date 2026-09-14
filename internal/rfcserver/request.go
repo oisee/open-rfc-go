@@ -153,3 +153,12 @@ func decodeUTF16LE(b []byte) string {
 	}
 	return strings.TrimRight(string(utf16.Decode(u)), " \x00")
 }
+
+// hasCutRequestPrefix reports whether a payload is a CUT function request at
+// all. A conversation carries other things — a logon, for one — and telling
+// them apart by what they start with is the only honest way: length works
+// until the day a call happens to be the same size.
+func hasCutRequestPrefix(payload []byte) bool {
+	return len(payload) >= len(cutRequestPrefix) &&
+		string(payload[:len(cutRequestPrefix)]) == string(cutRequestPrefix)
+}

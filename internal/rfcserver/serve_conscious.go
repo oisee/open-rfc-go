@@ -116,6 +116,22 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 		// So: recognise a logon payload before decoding it as a call, and
 		// answer it from a template the way the 0x06 0x03 branch does.
 		case len(got) > 80 && got[0] == 0x06 && got[1] == byte(0xcb): // function request
+			// …or a logon. Eclipse sends its logon inside an F_SAP_SEND after
+			// the conversation is already open, so the payload here is a CPIC
+			// logon rather than a call and has no CUT prefix. Told apart by
+			// that prefix rather than by length, which would be a guess.
+			if !hasCutRequestPrefix(got[80:]) {
+				accept, aerr := eclipseLogonAccept(got, convID, sequence)
+				if aerr != nil {
+					log("LOGON: " + aerr.Error())
+					return
+				}
+				if send(accept) != nil {
+					return
+				}
+				log(fmt.Sprintf("LOGON: accepted (conv=%s)", string(convID)))
+				continue
+			}
 			req, derr := DecodeCutFunctionRequest(got[80:])
 			if derr != nil {
 				log("SESSION: decode error: " + derr.Error())
