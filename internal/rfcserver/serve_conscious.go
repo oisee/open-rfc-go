@@ -96,6 +96,25 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			}
 			pingStep = 0
 			log(fmt.Sprintf("LOGON: init=%dB accept=%dB (conv=%s)", len(got), len(acc), string(convID)))
+		// NEXT: Eclipse's first F_SAP_SEND is a logon, not a call.
+		//
+		// An SM59 client logs on with its own verb, 0x06 0x03, and the branch
+		// above answers it from a template. Eclipse does not: it opens the
+		// conversation and then sends the logon *inside* an F_SAP_SEND, so it
+		// arrives here and is handed to DecodeCutFunctionRequest, which quite
+		// correctly says "bad CUT request prefix". Measured against a live
+		// Eclipse on 2026-09-14: handshake, initialize and allocate all
+		// answered, and this is where it stops.
+		//
+		// The answer is within reach and has the same shape as the rest. In
+		// eleven captured conversations the exchange is always 374 bytes in
+		// and 746 out, and those 746 differ in nineteen bytes: the
+		// conversation id at 41..47 and the counter at 77 and 79, both of
+		// which are already produced here, one byte at 7, and then 606..609,
+		// 611, 614..615 and 735..736, which are not yet identified.
+		//
+		// So: recognise a logon payload before decoding it as a call, and
+		// answer it from a template the way the 0x06 0x03 branch does.
 		case len(got) > 80 && got[0] == 0x06 && got[1] == byte(0xcb): // function request
 			req, derr := DecodeCutFunctionRequest(got[80:])
 			if derr != nil {
