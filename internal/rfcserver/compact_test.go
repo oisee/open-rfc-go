@@ -163,7 +163,7 @@ func TestEclipseRecordsSplitLongAnswers(t *testing.T) {
 	conv := []byte("00000042")
 	for _, size := range []int{70_000, 2*maxRecordData + 3, maxRecordData, maxRecordData + 1} {
 		cut := bytes.Repeat([]byte{0xee}, size)
-		records, err := eclipseRecords(cut, conv, 7)
+		records, err := eclipseRecords(cut, conv, 7, []byte{0, 0, 0, 0})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,9 +280,9 @@ func TestSingleRecordMatchesGatewayHeader(t *testing.T) {
 	// 06cb0200 <uid> 0006 0000 0000 00010000 00 000001f4 02 00000001 0008 0000 05 0c
 	// 00000000 00000000 <conv> <len> 00..00 00060002
 	data := bytes.Repeat([]byte{0xa5}, 700)
-	rec := buildEclipseRecord(data, []byte("00000001"), 0x1234, appcFSapSend, true, len(data))
+	rec := buildEclipseRecord(data, []byte("00000001"), 0x1234, appcFSapSend, true, len(data), []byte{0, 0, 0, 2})
 	want := mustDecode(t, "06cb0200"+"1234"+"0007"+"0000"+"0000"+"00010000"+"01"+"ffffffff"+"02"+"00000001"+"0008"+"0000"+"05"+"0c"+"00000000"+"00000000"+"3030303030303031"+
-		"00006d60"+"00000002"+hexU32(uint32(len(data)))+"00000001"+"00000000"+"0034313033"+"000000"+"00010000")
+		"00006d60"+"00000002"+hexU32(uint32(len(data)))+"00000001"+"00000000"+"0034313033"+"000000"+"00000002")
 	if !bytes.Equal(rec[:80], want) {
 		t.Fatalf("record header differs\n got %x\nwant %x", rec[:80], want)
 	}
@@ -302,4 +302,33 @@ func mustDecode(t *testing.T, s string) []byte {
 
 func hexU32(n uint32) string {
 	return fmt.Sprintf("%08x", n)
+}
+
+// A reply carries a zero communication index and the connection index the call
+// came in on. A caller may verify both; one that does hangs up on a reply that
+// hands back the 0xffff "unset" the request was sent with.
+func TestResponseIndicesAreAnsweredNotEchoed(t *testing.T) {
+	cut := bytes.Repeat([]byte{0x11}, 200)
+	conv := []byte("00000007")
+	cases := []struct{ caller, want []byte }{
+		{[]byte{0xff, 0xff, 0, 0}, []byte{0, 0, 0, 0}}, // the usual: unset in, zero out
+		{[]byte{0xff, 0xff, 0, 3}, []byte{0, 0, 0, 3}}, // the connection index survives
+		{[]byte{0, 0, 0, 0}, []byte{0, 0, 0, 0}},
+	}
+	for _, c := range cases {
+		records, err := responseRecords(cut, conv, 5, c.caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := records[0]
+		if got := binary.BigEndian.Uint32(rec[48:]); got != 0x00006d60 {
+			t.Fatalf("not the gateway block: %08x", got)
+		}
+		if !bytes.Equal(rec[76:80], c.want) {
+			t.Fatalf("caller %x answered with %x, want %x", c.caller, rec[76:80], c.want)
+		}
+		if !bytes.Equal(rec[40:48], conv) {
+			t.Fatalf("conversation id lost: %q", rec[40:48])
+		}
+	}
 }

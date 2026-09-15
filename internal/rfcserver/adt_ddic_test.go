@@ -281,3 +281,62 @@ func TestDictionaryAgreesWithTheGraph(t *testing.T) {
 		}
 	}
 }
+
+// The rows RFC_GET_STRUCTURE_DEFINITION returns, read by the client-side
+// decoder this repository already ports.
+func TestStructureDefinitionReadsAsTheClientReadsIt(t *testing.T) {
+	req := Request{
+		Eclipse: true, Order: binary.BigEndian,
+		Imports:          []cpic.NamedValue{{Name: "TABNAME", Value: utf16BE(adtRestRequest + strings.Repeat(" ", 13))}},
+		RequestedOutputs: []string{"TABLENGTH", "FIELDS"},
+	}
+	resp, err := StructureDefinitionHandler()(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Outputs) != 1 || resp.Outputs[0].Name != "TABLENGTH" || binary.LittleEndian.Uint32(resp.Outputs[0].Value) != adtStructureByteLength {
+		t.Fatalf("TABLENGTH: %+v", resp.Outputs)
+	}
+	// the flat view: three fields, not the six of the nested DDIC description
+	if len(resp.Tables) != 1 || resp.Tables[0].Name != "FIELDS" || len(resp.Tables[0].Rows) != 3 {
+		t.Fatalf("FIELDS: %+v", resp.Tables)
+	}
+	want := []string{"REQUEST_LINE:v", "HEADER_FIELDS:h", "MESSAGE_BODY:y"}
+	for i, row := range resp.Tables[0].Rows {
+		got, err := metadata.DecodeRfcFieldsRow(row)
+		if err != nil {
+			t.Fatalf("row %d: the client decoder refuses it: %v", i, err)
+		}
+		if got.TableName != adtRestRequest || got.FieldName+":"+got.Exid != want[i] || got.Position != int32(i+1) {
+			t.Fatalf("row %d decodes as %s:%s pos %d, want %s", i, got.FieldName, got.Exid, got.Position, want[i])
+		}
+	}
+	// a caller that named the table among its outputs but sent no table
+	// parameter is still answered, in the classic framing
+	cut, err := EncodeEclipseResponse(resp, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := responseFields(t, cut)
+	if len(valuesOf(fields, uint16(cpic.TagTableName))) != 1 {
+		t.Fatalf("the FIELDS table was not named in the answer: %04x", tagsOf(fields))
+	}
+	if n := len(valuesOf(fields, tagTableRow)); n != 3 {
+		t.Fatalf("%d rows on the wire", n)
+	}
+	// and the line structure a client asks for next
+	req.Imports[0].Value = utf16BE(adtRestRequestLine + strings.Repeat(" ", 8))
+	line, err := StructureDefinitionHandler()(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(line.Tables[0].Rows) != 3 {
+		t.Fatalf("%s has %d fields", adtRestRequestLine, len(line.Tables[0].Rows))
+	}
+	for i, row := range line.Tables[0].Rows {
+		got, _ := metadata.DecodeRfcFieldsRow(row)
+		if got.Offset != int32(i*8) || got.InternalLength != 8 {
+			t.Fatalf("%s field %d at %d len %d", adtRestRequestLine, i, got.Offset, got.InternalLength)
+		}
+	}
+}

@@ -205,7 +205,12 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				log("SESSION: encode error: " + werr.Error())
 				return
 			}
-			records, werr := eclipseRecords(respCUT, convID, binary.BigEndian.Uint16(got[4:6]))
+			// The record a response travels in differs by who is listening, the
+			// same way its chain does. Eclipse arrives through the gateway and
+			// is answered in the gateway's own header; a classic client checks
+			// the APPC extended info instead, and the gateway block makes it
+			// say the reply belongs to another conversation.
+			records, werr := responseRecords(respCUT, convID, binary.BigEndian.Uint16(got[4:6]), got[76:80])
 			if werr != nil {
 				log("SESSION: wrap error: " + werr.Error())
 				return

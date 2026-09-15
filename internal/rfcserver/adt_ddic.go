@@ -109,9 +109,28 @@ var adtDictionary = func() map[string]ddicType {
 	headerTable := ddicType{name: adtHeaderTable, kind: "TTYP", length: 16, rowtype: adtHeaderRow, authorid: "TKN", fields: []ddicField{
 		{position: 1, rollname: adtHeaderRow, datatype: "STRU", comptype: "T"},
 	}}
+	// The line structures are types in their own right. Eclipse never asks for
+	// them — it reads them out of the parent's LINES_DESCR — but a client that
+	// resolves a structure field by field does, so they are here as well.
+	lineStructure := func(name string, names ...string) ddicType {
+		var fields []ddicField
+		for i, n := range names {
+			datatype := "STRG"
+			leng := 0
+			if n == "STATUS_CODE" {
+				datatype, leng = "SSTR", 3
+			}
+			f := stringField(n, i+1, i*8, datatype, "g", name, n)
+			f.leng = leng
+			fields = append(fields, f)
+		}
+		return ddicType{name: name, kind: "INTTAB", length: 24, fields: fields}
+	}
 	types := []ddicType{
 		restStructure(adtRestRequest, "REQUEST_LINE", adtRestRequestLine),
 		restStructure(adtRestResponse, "STATUS_LINE", adtRestStatusLine),
+		lineStructure(adtRestRequestLine, "METHOD", "URI", "VERSION"),
+		lineStructure(adtRestStatusLine, "VERSION", "STATUS_CODE", "REASON_PHRASE"),
 		headerRow, headerTable,
 	}
 	byName := map[string]ddicType{}
@@ -329,13 +348,32 @@ func funintRow(p classicrfc.FunintParameter) ([]byte, error) {
 
 // answerTables fills the tables the caller sent: rows for the one named, none
 // for the others, every one answered by its number.
-func answerTables(req Request, name string, rowLength int, rows [][]byte) []Table {
+//
+// A caller need not send a table to receive one. Eclipse declares each table
+// parameter in the call, numbered, and is answered by number; an RFC client
+// names them only among the outputs it wants and is answered by name. So any
+// requested output that is a table of this function and did not arrive as one
+// is added here, and the encoder frames it the classic way because it has no
+// number to be answered by.
+func answerTables(req Request, name string, rowLength int, rows [][]byte, alsoEmpty ...string) []Table {
 	var out []Table
+	seen := map[string]bool{}
 	for _, t := range req.Tables {
 		answer := Table{Name: t.Name, ID: t.ID, RowByteLength: t.RowByteLength}
 		if t.Name == name {
 			answer.RowByteLength = rowLength
 			answer.Rows = rows
+		}
+		seen[t.Name] = true
+		out = append(out, answer)
+	}
+	for _, want := range append([]string{name}, alsoEmpty...) {
+		if seen[want] || !wants(req, want) {
+			continue
+		}
+		answer := Table{Name: want}
+		if want == name {
+			answer.RowByteLength, answer.Rows = rowLength, rows
 		}
 		out = append(out, answer)
 	}
@@ -388,7 +426,7 @@ func FunctionInterfaceHandler() Handler {
 			}
 			rows = append(rows, row)
 		}
-		resp.Tables = answerTables(req, "PARAMS", funintRowLength, rows)
+		resp.Tables = answerTables(req, "PARAMS", funintRowLength, rows, "RESUMABLE_EXCEPTIONS")
 		return resp, nil
 	}
 }
@@ -443,6 +481,94 @@ func FieldInfoHandler() Handler {
 			rows = append(rows, row)
 		}
 		resp.Tables = answerTables(req, "DFIES_TAB", dfiesRowLength, rows)
+		return resp, nil
+	}
+}
+
+// RFC_FIELDS geometry: the row a client reads a structure's fields from.
+const (
+	rfcFieldsRowLength = 138
+	// a reference field — a substructure or a table — occupies eight bytes in
+	// the flat layout, which is what the DDIC rows above already say
+	adtStructureByteLength = 40
+)
+
+// fieldsRow writes one RFC_FIELDS row: two thirty-character names, four
+// little-endian integers and the internal type.
+func fieldsRow(tabname string, f ddicField) ([]byte, error) {
+	out := make([]byte, 0, rfcFieldsRowLength)
+	for _, s := range []struct {
+		v string
+		w int
+	}{{tabname, 30}, {f.name, 30}} {
+		enc, err := classicrfc.EncodeAbapChar(s.v, s.w)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, enc...)
+	}
+	var ints [16]byte
+	binary.LittleEndian.PutUint32(ints[0:], uint32(f.position))
+	binary.LittleEndian.PutUint32(ints[4:], uint32(f.offset))
+	binary.LittleEndian.PutUint32(ints[8:], uint32(f.intlen))
+	binary.LittleEndian.PutUint32(ints[12:], 0) // decimals
+	out = append(out, ints[:]...)
+	exid, err := classicrfc.EncodeAbapChar(f.inttype, 1)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, exid...)
+	if len(out) != rfcFieldsRowLength {
+		return nil, fmt.Errorf("rfcserver: RFC_FIELDS row is %d bytes, not %d", len(out), rfcFieldsRowLength)
+	}
+	return out, nil
+}
+
+// StructureDefinitionHandler answers RFC_GET_STRUCTURE_DEFINITION.
+//
+// Eclipse learns a structure through DDIF_FIELDINFO_GET; an RFC client asks
+// this instead (after trying RFC_METADATA_GET, which this bridge does not
+// pretend to have). Same dictionary, a flatter answer: the structure's byte
+// length and one row per field.
+func StructureDefinitionHandler() Handler {
+	return func(ctx context.Context, req Request) (Response, error) {
+		name, _ := req.ImportText("TABNAME")
+		t, ok := adtDictionary[name]
+		if !ok {
+			return Response{}, &Exception{Key: "NOT_FOUND"}
+		}
+		fields := t.fields
+		if t.kind == "TTYP" {
+			// a table type is described by its line type
+			fields = adtDictionary[t.rowtype].fields
+		}
+		// RFC_FIELDS is a FLAT view: a component of a substructure has an
+		// offset inside that substructure, and listing it beside its parent
+		// makes the two overlap, which a client rejects. Only the fields this
+		// structure owns directly are listed; a client that wants what is
+		// inside REQUEST_LINE asks for REQUEST_LINE.
+		var top []ddicField
+		for _, f := range fields {
+			if f.precfield == "" || f.precfield == t.name {
+				top = append(top, f)
+			}
+		}
+		var rows [][]byte
+		for i, f := range top {
+			f.position = i + 1
+			row, err := fieldsRow(name, f)
+			if err != nil {
+				return Response{}, err
+			}
+			rows = append(rows, row)
+		}
+		var resp Response
+		if wants(req, "TABLENGTH") {
+			length := make([]byte, 4)
+			binary.LittleEndian.PutUint32(length, uint32(t.length))
+			resp.Outputs = append(resp.Outputs, Output{Name: "TABLENGTH", Value: length})
+		}
+		resp.Tables = answerTables(req, "FIELDS", rfcFieldsRowLength, rows)
 		return resp, nil
 	}
 }

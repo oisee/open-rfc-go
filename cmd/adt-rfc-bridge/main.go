@@ -140,6 +140,7 @@ func main() {
 			// interface and the dictionary of the types it names
 			dispatcher.Handle("RFC_GET_FUNCTION_INTERFACE", rfcserver.FunctionInterfaceHandler())
 			dispatcher.Handle("DDIF_FIELDINFO_GET", rfcserver.FieldInfoHandler())
+			dispatcher.Handle("RFC_GET_STRUCTURE_DEFINITION", rfcserver.StructureDefinitionHandler())
 			dispatcher.Identity = target.LogonIdentity()
 			logf := func(string) {}
 			if *verbose {

@@ -98,7 +98,23 @@ func EncodeEclipseResponse(resp Response, req Request) ([]byte, error) {
 	fields = append(fields, cpic.Field{Tag: uint16(cpic.TagProgram), Value: program})
 	for _, t := range resp.Tables {
 		if len(t.ID) != 4 {
-			return nil, fmt.Errorf("%w: table %s has no number to answer by", ErrRequest, t.Name)
+			// no number: the classic framing, the table named rather than
+			// numbered, which is what a caller that did not number it reads
+			name, err := encodeName(t.Name)
+			if err != nil {
+				return nil, err
+			}
+			geometry := make([]byte, 8)
+			binary.BigEndian.PutUint32(geometry[0:], uint32(t.RowByteLength))
+			binary.BigEndian.PutUint32(geometry[4:], uint32(len(t.Rows)))
+			fields = append(fields,
+				cpic.Field{Tag: uint16(cpic.TagTableName), Value: name},
+				cpic.Field{Tag: uint16(cpic.TagTableHeader), Value: geometry},
+			)
+			for _, row := range t.Rows {
+				fields = append(fields, cpic.Field{Tag: tagTableRow, Value: append([]byte(nil), row...)})
+			}
+			continue
 		}
 		header := make([]byte, 12)
 		binary.BigEndian.PutUint32(header[0:], 0x0a)
@@ -186,10 +202,31 @@ func deflate(doc []byte) ([]byte, error) {
 // is not final followed by F_RECEIVE records, the last final. The final piece
 // is never shorter than the eight-byte trailer, so a short tail is topped up
 // from the record before it.
-func eclipseRecords(cut, convID []byte, uid uint16) ([][]byte, error) {
+// responseRecords frames a response in the gateway's header, carrying the
+// communication and connection index a caller checks.
+//
+// Those are the last four bytes of the operation-info, and they are not simply
+// echoed. A request arrives with the communication index set to 0xffff, which
+// means "unset", and a reply that hands 0xffff back is a reply to nobody: a
+// client that verifies it says the answer belongs to another conversation and
+// hangs up. The server answers with a communication index of zero — which is
+// what the logon accept carries, and what that same client accepts — and with
+// the connection index the call came in on.
+//
+// Eclipse checks neither and takes whatever arrives; an RFC client checks both.
+// This satisfies the strict one without having to know which is listening.
+func responseRecords(cut, convID []byte, uid uint16, callerInfo []byte) ([][]byte, error) {
+	commConn := []byte{0, 0, 0, 0}
+	if len(callerInfo) == 4 {
+		copy(commConn[2:], callerInfo[2:4]) // the connection index, as it came
+	}
+	return eclipseRecords(cut, convID, uid, commConn)
+}
+
+func eclipseRecords(cut, convID []byte, uid uint16, commConn []byte) ([][]byte, error) {
 	total := len(cut)
 	if total <= maxRecordData {
-		return [][]byte{buildEclipseRecord(cut, convID, uid, appcFSapSend, true, total)}, nil
+		return [][]byte{buildEclipseRecord(cut, convID, uid, appcFSapSend, true, total, commConn)}, nil
 	}
 	var pieces [][]byte
 	for off := 0; off < total; off += maxRecordData {
@@ -208,7 +245,7 @@ func eclipseRecords(cut, convID []byte, uid uint16) ([][]byte, error) {
 		if i > 0 {
 			fn = appcFReceive
 		}
-		records = append(records, buildEclipseRecord(piece, convID, uid, fn, final, total))
+		records = append(records, buildEclipseRecord(piece, convID, uid, fn, final, total, commConn))
 	}
 	return records, nil
 }
@@ -225,7 +262,7 @@ const appcFReceive = 0x09
 // "4103", and a 00000002 tail. The length is the record's own data, not the
 // message minus a trailer — that was a different protocol's frame, and Eclipse
 // aborted the conversation (an F_0x0b reply) when it saw it.
-func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, msgLen int) []byte {
+func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, msgLen int, commConn []byte) []byte {
 	rec := make([]byte, appcHeaderLen+len(data))
 	h := rec[:appcHeaderLen]
 	h[0] = appcProtocol // 0x06
@@ -254,9 +291,10 @@ func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, ms
 	binary.BigEndian.PutUint32(op[12:], 0x00000001)
 	// op[16:20] zero
 	copy(op[20:], []byte{0x00, 0x34, 0x31, 0x30, 0x33}) // 00 "4103"
-	// the last word varies across responses (a counter the client does not
-	// check); 00010000 is the value most of them carry
-	binary.BigEndian.PutUint32(op[28:], 0x00010000)
+	// the communication and connection index, as the call carried them
+	if len(commConn) == 4 {
+		copy(op[28:], commConn)
+	}
 	copy(rec[appcHeaderLen:], data)
 	return rec
 }
