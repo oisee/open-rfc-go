@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/oisee/open-rfc-go/internal/appc"
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
 )
@@ -171,26 +170,30 @@ func deflate(doc []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// eclipseRecords wraps a response for the wire, in as many APPC records as it
-// takes.
+// eclipseRecords wraps a response for the wire, in the record header the
+// gateway gives a response — not the one an SM59 client is answered with.
 //
-// A data record carries at most 28000 bytes. The system sends a longer answer
-// as an F_SAP_SEND that is not final, then F_RECEIVE records, the last of them
-// final: measured on a 36 KB discovery document, which arrived as 28000 + 7996.
-// The final record's last eight bytes are the chain's end field and the
-// trailer, which the header counts as SAP parameters, so the last piece is
-// never shorter than that.
+// The header is a near-constant frame measured over every response of a live
+// session (125 of them): gwid 6, time 00010000, timeout 000001f4, info4 2,
+// sequence 1, and a 32-byte operation-info block whose first four bytes hold
+// the message length, its content without the eight-byte final SAP trailer,
+// and whose last four are 00060002. Our answers carried none of it — an
+// all-zero header the gateway never produces — and Eclipse refused them at the
+// CPIC receive with "CMRCV; null", which is a transport refusal, not a
+// complaint about the answer inside.
+//
+// A record carries at most 28000 bytes; a longer answer is an F_SAP_SEND that
+// is not final followed by F_RECEIVE records, the last final. The final piece
+// is never shorter than the eight-byte trailer, so a short tail is topped up
+// from the record before it.
 func eclipseRecords(cut, convID []byte, uid uint16) ([][]byte, error) {
-	if len(cut) <= maxRecordData {
-		one, err := wrapFSapSend(cut, convID, uid)
-		if err != nil {
-			return nil, err
-		}
-		return [][]byte{one}, nil
+	total := len(cut)
+	if total <= maxRecordData {
+		return [][]byte{buildEclipseRecord(cut, convID, uid, appcFSapSend, true, total)}, nil
 	}
 	var pieces [][]byte
-	for off := 0; off < len(cut); off += maxRecordData {
-		pieces = append(pieces, cut[off:min(off+maxRecordData, len(cut))])
+	for off := 0; off < total; off += maxRecordData {
+		pieces = append(pieces, cut[off:min(off+maxRecordData, total)])
 	}
 	if last := pieces[len(pieces)-1]; len(last) < 8 {
 		prev := pieces[len(pieces)-2]
@@ -199,27 +202,50 @@ func eclipseRecords(cut, convID []byte, uid uint16) ([][]byte, error) {
 		pieces[len(pieces)-2] = prev[:len(prev)-take]
 	}
 	records := make([][]byte, 0, len(pieces))
-	gwID := uint16(1)
-	timeout := int32(-1)
 	for i, piece := range pieces {
 		final := i == len(pieces)-1
-		fn := appc.FuncSapSend
+		fn := byte(appcFSapSend)
 		if i > 0 {
-			fn = appc.FuncReceive
+			fn = appcFReceive
 		}
-		t := uint32(i+1) << 16
-		rec, err := appc.EncodeDataRecord(appc.DataRecordInput{
-			RecordHeaderInput: appc.RecordHeaderInput{
-				UID: &uid, GatewayID: &gwID, ConversationID: convID, Timeout: &timeout, Time: &t,
-			},
-			FunctionCode: &fn,
-			Data:         piece,
-			IsFinal:      &final,
-		})
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, rec)
+		records = append(records, buildEclipseRecord(piece, convID, uid, fn, final, total))
 	}
 	return records, nil
+}
+
+// appcFReceive is F_RECEIVE, the verb a continued response uses after the first
+// F_SAP_SEND record.
+const appcFReceive = 0x09
+
+// buildEclipseRecord frames one response record with the gateway's own header.
+// msgLen is the whole message's byte length, the same on every record of it.
+func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, msgLen int) []byte {
+	rec := make([]byte, appcHeaderLen+len(data))
+	h := rec[:appcHeaderLen]
+	h[0] = appcProtocol // 0x06
+	h[1] = fn
+	h[2] = 0x02 // protocol
+	binary.BigEndian.PutUint16(h[4:], uid)
+	binary.BigEndian.PutUint16(h[6:], 0x0006) // gateway id
+	binary.BigEndian.PutUint32(h[12:], 0x00010000)
+	binary.BigEndian.PutUint32(h[17:], 0x000001f4) // timeout
+	h[21] = 0x02                                   // info4
+	binary.BigEndian.PutUint32(h[22:], 1)          // sequence
+	if final {
+		binary.BigEndian.PutUint16(h[26:], 8) // final SAP parameter length
+		h[30] = 0x05                          // info: last record of a message
+		h[31] = 0x0c                          // vector
+	} else {
+		h[30] = 0x01
+		h[31] = 0x08
+	}
+	copy(h[40:48], convID)
+	// operation-info: the content length (without the 8-byte trailer), then
+	// zeros, then the constant 00060002 tail
+	if msgLen >= 8 {
+		binary.BigEndian.PutUint32(h[48:], uint32(msgLen-8))
+	}
+	binary.BigEndian.PutUint32(h[76:], 0x00060002)
+	copy(rec[appcHeaderLen:], data)
+	return rec
 }

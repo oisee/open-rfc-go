@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -268,4 +270,36 @@ func TestServeConsciousJoinsContinuedRecords(t *testing.T) {
 	if echo != "split across two records" {
 		t.Fatalf("ECHOTEXT = %q", echo)
 	}
+}
+
+// The single-record header, masked to what the gateway holds constant, is the
+// header the system sends. The bytes below are a captured response header with
+// the uid, conversation, and message length blanked — routing only, no
+// identifiers — and are the shape Eclipse receives without CMRCV.
+func TestSingleRecordMatchesGatewayHeader(t *testing.T) {
+	// 06cb0200 <uid> 0006 0000 0000 00010000 00 000001f4 02 00000001 0008 0000 05 0c
+	// 00000000 00000000 <conv> <len> 00..00 00060002
+	data := bytes.Repeat([]byte{0xa5}, 700)
+	rec := buildEclipseRecord(data, []byte("00000001"), 0x1234, appcFSapSend, true, len(data))
+	want := mustDecode(t, "06cb0200"+"1234"+"0006"+"0000"+"0000"+"00010000"+"00"+"000001f4"+"02"+"00000001"+"0008"+"0000"+"05"+"0c"+"00000000"+"00000000"+"3030303030303031"+
+		hexU32(uint32(len(data)-8))+"000000000000000000000000000000000000000000000000"+"00060002")
+	if !bytes.Equal(rec[:80], want) {
+		t.Fatalf("record header differs\n got %x\nwant %x", rec[:80], want)
+	}
+	if len(rec) != 80+len(data) {
+		t.Fatalf("record is %d bytes", len(rec))
+	}
+}
+
+func mustDecode(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func hexU32(n uint32) string {
+	return fmt.Sprintf("%08x", n)
 }
