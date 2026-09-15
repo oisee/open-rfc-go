@@ -68,10 +68,10 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		// one caller. Two Eclipses sharing a jar would share a context, which
 		// is a data leak wearing the costume of a caching bug.
 		//
-		// The CSRF dance is deliberately not implemented here. Eclipse does it
-		// itself — it asks for a token and sends it back — and a bridge that
-		// joined in would be answering a question nobody asked. What a bridge
-		// must do is not get in the way: keep the cookies, keep the headers.
+		// The CSRF token lives beside this jar, in adt_csrf.go: it belongs to
+		// the session the jar holds, and over RFC the bridge is the one that
+		// has a session at all. This once said Eclipse does the dance itself.
+		// It does not — see adt_csrf.go for what the wire showed.
 		jar, err := cookiejar.New(nil)
 		if err != nil {
 			return nil, fmt.Errorf("rfcserver: cookie jar: %w", err)
@@ -79,6 +79,7 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		client = &http.Client{Jar: jar}
 	}
 	graph := ADTRestGraph()
+	csrf := &csrfState{}
 
 	return func(ctx context.Context, req Request) (Response, error) {
 		var decoded any
@@ -106,16 +107,54 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 				return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
 			}
 		}
-		outgoing, err := httpRequestOf(ctx, base, decoded)
-		if err != nil {
-			return Response{}, err
+		send := func() (*http.Response, error) {
+			outgoing, err := httpRequestOf(ctx, base, decoded)
+			if err != nil {
+				return nil, err
+			}
+			// who we are to the backend: the RFC logon authenticated the client
+			// to us, and the backend saw none of it
+			backend.apply(outgoing)
+			if isModifyingMethod(outgoing.Method) {
+				// Whatever token the caller put on the request was minted for a
+				// session the backend never saw, so it is replaced rather than
+				// forwarded.
+				outgoing.Header.Del("X-CSRF-Token")
+				token := csrf.get()
+				if !isCSRFToken(token) {
+					token, err = fetchCSRFToken(ctx, client, base, backend)
+					if err != nil {
+						return nil, err
+					}
+					csrf.set(token)
+				}
+				if isCSRFToken(token) {
+					outgoing.Header.Set("X-CSRF-Token", token)
+				}
+			}
+			// The cookies go on inside Do, from the jar, which is after this
+			// and therefore after the token: a token paired with the cookies of
+			// the session it replaced is the mismatch the server calls a CSRF
+			// failure.
+			return client.Do(outgoing)
 		}
-		// who we are to the backend: the RFC logon authenticated the client to
-		// us, and the backend saw none of it
-		backend.apply(outgoing)
-		answer, err := client.Do(outgoing)
+
+		answer, err := send()
 		if err != nil {
 			return Response{}, fmt.Errorf("rfcserver: the backend did not answer: %w", err)
+		}
+		if wantsCSRFToken(answer) {
+			// The token was stale, or the backend wanted one and would not mint
+			// it until asked. Mint again and send the request once more — once,
+			// so a backend that always says Required answers Eclipse with its
+			// 403 instead of being asked forever.
+			_, _ = io.Copy(io.Discard, io.LimitReader(answer.Body, 1<<20))
+			answer.Body.Close()
+			csrf.set("")
+			answer, err = send()
+			if err != nil {
+				return Response{}, fmt.Errorf("rfcserver: the backend did not answer: %w", err)
+			}
 		}
 		defer answer.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(answer.Body, adtMaxBodyBytes))
