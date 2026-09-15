@@ -218,7 +218,13 @@ func eclipseRecords(cut, convID []byte, uid uint16) ([][]byte, error) {
 const appcFReceive = 0x09
 
 // buildEclipseRecord frames one response record with the gateway's own header.
-// msgLen is the whole message's byte length, the same on every record of it.
+//
+// The operation-info block is the one the ADT gateway responses carry (63 of
+// them, all identical but for the length): a leading 00006d60 00000002, this
+// record's data length, then 00000001 00000000, the gateway protocol level
+// "4103", and a 00000002 tail. The length is the record's own data, not the
+// message minus a trailer — that was a different protocol's frame, and Eclipse
+// aborted the conversation (an F_0x0b reply) when it saw it.
 func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, msgLen int) []byte {
 	rec := make([]byte, appcHeaderLen+len(data))
 	h := rec[:appcHeaderLen]
@@ -226,9 +232,10 @@ func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, ms
 	h[1] = fn
 	h[2] = 0x02 // protocol
 	binary.BigEndian.PutUint16(h[4:], uid)
-	binary.BigEndian.PutUint16(h[6:], 0x0006) // gateway id
+	binary.BigEndian.PutUint16(h[6:], 0x0007) // gateway id
 	binary.BigEndian.PutUint32(h[12:], 0x00010000)
-	binary.BigEndian.PutUint32(h[17:], 0x000001f4) // timeout
+	h[16] = 0x01                                   // info3: as every ADT response carries it
+	binary.BigEndian.PutUint32(h[17:], 0xffffffff) // timeout
 	h[21] = 0x02                                   // info4
 	binary.BigEndian.PutUint32(h[22:], 1)          // sequence
 	if final {
@@ -240,12 +247,16 @@ func buildEclipseRecord(data, convID []byte, uid uint16, fn byte, final bool, ms
 		h[31] = 0x08
 	}
 	copy(h[40:48], convID)
-	// operation-info: the content length (without the 8-byte trailer), then
-	// zeros, then the constant 00060002 tail
-	if msgLen >= 8 {
-		binary.BigEndian.PutUint32(h[48:], uint32(msgLen-8))
-	}
-	binary.BigEndian.PutUint32(h[76:], 0x00060002)
+	op := h[48:80]
+	binary.BigEndian.PutUint32(op[0:], 0x00006d60)
+	binary.BigEndian.PutUint32(op[4:], 0x00000002)
+	binary.BigEndian.PutUint32(op[8:], uint32(len(data))) // this record's data length
+	binary.BigEndian.PutUint32(op[12:], 0x00000001)
+	// op[16:20] zero
+	copy(op[20:], []byte{0x00, 0x34, 0x31, 0x30, 0x33}) // 00 "4103"
+	// the last word varies across responses (a counter the client does not
+	// check); 00010000 is the value most of them carry
+	binary.BigEndian.PutUint32(op[28:], 0x00010000)
 	copy(rec[appcHeaderLen:], data)
 	return rec
 }

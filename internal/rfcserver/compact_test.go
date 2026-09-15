@@ -281,8 +281,8 @@ func TestSingleRecordMatchesGatewayHeader(t *testing.T) {
 	// 00000000 00000000 <conv> <len> 00..00 00060002
 	data := bytes.Repeat([]byte{0xa5}, 700)
 	rec := buildEclipseRecord(data, []byte("00000001"), 0x1234, appcFSapSend, true, len(data))
-	want := mustDecode(t, "06cb0200"+"1234"+"0006"+"0000"+"0000"+"00010000"+"00"+"000001f4"+"02"+"00000001"+"0008"+"0000"+"05"+"0c"+"00000000"+"00000000"+"3030303030303031"+
-		hexU32(uint32(len(data)-8))+"000000000000000000000000000000000000000000000000"+"00060002")
+	want := mustDecode(t, "06cb0200"+"1234"+"0007"+"0000"+"0000"+"00010000"+"01"+"ffffffff"+"02"+"00000001"+"0008"+"0000"+"05"+"0c"+"00000000"+"00000000"+"3030303030303031"+
+		"00006d60"+"00000002"+hexU32(uint32(len(data)))+"00000001"+"00000000"+"0034313033"+"000000"+"00010000")
 	if !bytes.Equal(rec[:80], want) {
 		t.Fatalf("record header differs\n got %x\nwant %x", rec[:80], want)
 	}

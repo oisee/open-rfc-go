@@ -49,6 +49,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
@@ -136,7 +137,7 @@ func main() {
 			if *verbose {
 				logf = func(s string) { log.Printf("adt-rfc-bridge: %s: %s", peer, s) }
 			}
-			rfcserver.ServeConscious(conn, dispatcher, logf, nil)
+			rfcserver.ServeConscious(conn, dispatcher, logf, dumper(peer))
 			log.Printf("adt-rfc-bridge: %s gone", peer)
 		}()
 	}
@@ -184,3 +185,26 @@ func ownBuildStamp() string {
 	}
 	return stamp
 }
+
+// dumper returns a frame recorder when STG_DUMP names a file, else nil. It
+// appends one JSON line per frame, hex-encoded, so a session can be diffed
+// against a capture. The bytes carry a logon and a session, so it is off
+// unless asked and writes only under a path the operator chose.
+func dumper(peer string) func(string, []byte) {
+	path := os.Getenv("STG_DUMP")
+	if path == "" {
+		return nil
+	}
+	return func(dir string, frame []byte) {
+		dumpMu.Lock()
+		defer dumpMu.Unlock()
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "{\"peer\":%q,\"dir\":%q,\"len\":%d,\"hex\":%q}\n", peer, dir, len(frame), hex.EncodeToString(frame))
+	}
+}
+
+var dumpMu sync.Mutex
