@@ -60,3 +60,43 @@ const (
 	cutReqTag1 = 0x02 // CUT request prefix byte 1 (0x00 for a response)
 	cutRespT1  = 0x00 // CUT response prefix byte 1
 )
+
+// Tags Eclipse's calls use that the classic and S/4 vocabularies above do not.
+//
+// Measured over a live Eclipse↔A4H session (2026-09-15). The compact family
+// carries SADT_REST_RFC_ENDPOINT's recursive parameters as SAP Binary XML —
+// see internal/bxml — instead of the xRFC boundaries 0x3c02/0x3c05:
+//
+//	4000  two bytes: 01 and a flag, 00 = the payload follows as it is,
+//	      01 = the payload is a raw DEFLATE stream (Eclipse sends 00,
+//	      the system answers 01)
+//	4001  the request payload, in chunks of at most 16384 bytes
+//	4002  the response payload, chunked the same way
+//	4004  empty, closes the parameter
+//
+// The table family is how a server refers to a table the client sent: the
+// client numbers each table (0x0330 after its name), and the answer names it by
+// number rather than by name.
+const (
+	tagCompactFlag     = 0x4000
+	tagCompactRequest  = 0x4001
+	tagCompactResponse = 0x4002
+	tagCompactEnd      = 0x4004
+	compactChunkLength = 16384
+
+	tagTableID       = 0x0330 // request: the number the client gives a table
+	tagFirstTableID  = 0x0331 // response: the first table's number, right after 0x0500
+	tagTableIDHeader = 0x0335 // response: 0000000a, the number, the row count
+	tagTableRow      = 0x0303 // response: one row, as it is
+	tagTableIDEnd    = 0x0336 // response: the number again, after the rows
+	tagCompactClose  = 0x0523 // response: empty, after the compact parameter
+
+	// header byte 30 of a data record: 5 on the last record of a message,
+	// 1 on one that continues
+	recordInfoFinal = 0x05
+
+	// what the system says a single response record may carry before it
+	// continues in an F_RECEIVE record; the value it writes at header
+	// offset 48 of every data record
+	maxRecordData = 28000
+)

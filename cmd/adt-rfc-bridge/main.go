@@ -70,7 +70,7 @@ func main() {
 	// deploy, a test, an unchanged symptom, and no way to tell a fix that did
 	// not work from a fix that never shipped. The binary hashes itself, so the
 	// log says.
-	log.Printf("adt-rfc-bridge: build %s", ownBuildStamp())
+	log.Printf("adt-rfc-bridge: %s build %s", version, ownBuildStamp())
 
 	target, err := rfcserver.LoadBackend(*config)
 	if err != nil {
@@ -127,6 +127,10 @@ func main() {
 			}
 			dispatcher := rfcserver.NewDispatcher()
 			dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
+			// what Eclipse asks before its first call: the function's
+			// interface and the dictionary of the types it names
+			dispatcher.Handle("RFC_GET_FUNCTION_INTERFACE", rfcserver.FunctionInterfaceHandler())
+			dispatcher.Handle("DDIF_FIELDINFO_GET", rfcserver.FieldInfoHandler())
 			dispatcher.Identity = target.LogonIdentity()
 			logf := func(string) {}
 			if *verbose {
@@ -147,6 +151,11 @@ func targetUser(b rfcserver.Backend) string {
 	}
 	return b.User
 }
+
+// version is set at build time by scripts/build-bridge.sh, which derives it
+// from git: the commit count, which only goes up, and the commit it was built
+// from. A binary built any other way says so.
+var version = "dev"
 
 // ownBuildStamp is the first eight bytes of this executable's SHA-256, which
 // is enough to tell two builds apart and short enough to read off a log line.

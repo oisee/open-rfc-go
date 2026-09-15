@@ -33,6 +33,27 @@ type Response struct {
 	// XML. A function whose exports are structures of structures — ADT's REST
 	// endpoint is one — answers here and not in Exports.
 	XrfcParameters []cpic.NamedValue
+	// Compact is a recursive parameter to be sent as SAP Binary XML in the
+	// 0x4000 family, the way SADT_REST_RFC_ENDPOINT answers Eclipse. The
+	// document is given plain; the encoder compresses it. CompactName is the
+	// parameter's name, for the 0x0205 echo.
+	Compact     []byte
+	CompactName string
+
+	// Outputs are the scalar and xRFC exports of an Eclipse answer, in the
+	// order the system returns them — which is the function's parameter order,
+	// not the order the client asked for them, and interleaves the two kinds
+	// (a DDIF answer is DFIES_WA, then the LINES_DESCR xRFC, then X030L_WA).
+	// The Eclipse encoder uses this list; the S/4 path uses Exports and
+	// XrfcParameters.
+	Outputs []Output
+}
+
+// Output is one named export of an Eclipse answer.
+type Output struct {
+	Name  string
+	XML   bool // an xRFC recursive export (3c02 chunks) rather than a scalar
+	Value []byte
 }
 
 // Exception is a handler error that raises a declared ABAP exception with Key.

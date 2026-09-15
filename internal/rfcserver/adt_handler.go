@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oisee/open-rfc-go/internal/bxml"
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
 	"github.com/oisee/open-rfc-go/internal/cpic"
 	"github.com/oisee/open-rfc-go/internal/xrfc"
@@ -80,13 +81,30 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 	graph := ADTRestGraph()
 
 	return func(ctx context.Context, req Request) (Response, error) {
-		xml, err := namedXrfc(req.XrfcParameters, "REQUEST")
-		if err != nil {
-			return Response{}, err
-		}
-		decoded, err := xrfc.DecodeRecursiveParameter(requestDescriptor, graph, xml, xrfc.RecursiveLimits{})
-		if err != nil {
-			return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
+		var decoded any
+		if req.Compact != nil {
+			// Eclipse: the parameter is Binary XML in the 0x4000 family
+			tree, err := bxml.Decode(req.Compact)
+			if err != nil {
+				return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
+			}
+			root, err := bxml.PayloadRoot(tree)
+			if err != nil {
+				return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
+			}
+			if root.Name != "REQUEST" {
+				return Response{}, fmt.Errorf("rfcserver: the compact parameter is %s, not REQUEST", root.Name)
+			}
+			decoded = requestValueOf(root)
+		} else {
+			xml, err := namedXrfc(req.XrfcParameters, "REQUEST")
+			if err != nil {
+				return Response{}, err
+			}
+			decoded, err = xrfc.DecodeRecursiveParameter(requestDescriptor, graph, xml, xrfc.RecursiveLimits{})
+			if err != nil {
+				return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
+			}
 		}
 		outgoing, err := httpRequestOf(ctx, base, decoded)
 		if err != nil {
@@ -104,12 +122,98 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		if err != nil {
 			return Response{}, fmt.Errorf("rfcserver: the backend's answer could not be read: %w", err)
 		}
+		if req.Compact != nil {
+			doc, err := bxml.Encode(responseElement(answer, body))
+			if err != nil {
+				return Response{}, fmt.Errorf("rfcserver: RESPONSE could not be written: %w", err)
+			}
+			return Response{Compact: doc, CompactName: "RESPONSE"}, nil
+		}
 		encoded, err := xrfc.EncodeRecursiveParameter(responseDescriptor, graph, responseValue(answer, body), xrfc.RecursiveLimits{})
 		if err != nil {
 			return Response{}, fmt.Errorf("rfcserver: RESPONSE could not be written: %w", err)
 		}
 		return Response{XrfcParameters: []cpic.NamedValue{{Name: "RESPONSE", Value: encoded}}}, nil
 	}, nil
+}
+
+// requestValueOf reads a REQUEST document into the same value the xRFC codec
+// produces, so one httpRequestOf serves both framings.
+//
+// A header row is `item`; the body is text, an opaque body, or absent — the
+// capture has all three, and an absent one is an empty element.
+func requestValueOf(root *bxml.Element) map[string]any {
+	line := root.Child("REQUEST_LINE")
+	var headers []any
+	if fields := root.Child("HEADER_FIELDS"); fields != nil {
+		for _, row := range fields.Children {
+			headers = append(headers, map[string]any{
+				"NAME":  row.ChildText("NAME"),
+				"VALUE": row.ChildText("VALUE"),
+			})
+		}
+	}
+	var body []byte
+	if b := root.Child("MESSAGE_BODY"); b != nil {
+		switch {
+		case b.HasBody:
+			body = []byte(b.Body)
+		case b.HasText:
+			body = []byte(b.Text)
+		}
+	}
+	return map[string]any{
+		"REQUEST_LINE": map[string]any{
+			"METHOD":  line.ChildText("METHOD"),
+			"URI":     line.ChildText("URI"),
+			"VERSION": line.ChildText("VERSION"),
+		},
+		"HEADER_FIELDS": headers,
+		"MESSAGE_BODY":  body,
+	}
+}
+
+// responseElement writes an HTTP answer as the RESPONSE document the system
+// writes, measured over 478 of them:
+//
+//   - STATUS_CODE is four characters, the code and a blank ("200 ", "304 ");
+//   - the header rows are named after their line type, IHTTPNVP, and the
+//     first of them is always ~server_protocol, the ICF's own;
+//   - an empty body is an empty element, not an empty body token.
+func responseElement(answer *http.Response, body []byte) *bxml.Element {
+	text := func(name, value string) *bxml.Element {
+		return &bxml.Element{Name: name, Text: value, HasText: true}
+	}
+	row := func(name, value string) *bxml.Element {
+		return &bxml.Element{Name: adtHeaderRow, Children: []*bxml.Element{text("NAME", name), text("VALUE", value)}}
+	}
+	rows := []*bxml.Element{row("~server_protocol", answer.Proto)}
+	for name, values := range answer.Header {
+		if strings.Contains(hopByHop, strings.ToLower(name)) {
+			continue
+		}
+		for _, value := range values {
+			rows = append(rows, row(name, value))
+		}
+	}
+	reason := answer.Status
+	if at := strings.IndexByte(reason, ' '); at >= 0 {
+		reason = reason[at+1:]
+	}
+	messageBody := &bxml.Element{Name: "MESSAGE_BODY"}
+	if len(body) > 0 {
+		messageBody.Body = string(body)
+		messageBody.HasBody = true
+	}
+	return &bxml.Element{Name: "RESPONSE", Children: []*bxml.Element{
+		{Name: "STATUS_LINE", Children: []*bxml.Element{
+			text("VERSION", answer.Proto),
+			text("STATUS_CODE", fmt.Sprintf("%-4d", answer.StatusCode)),
+			text("REASON_PHRASE", reason),
+		}},
+		{Name: "HEADER_FIELDS", Attrs: []bxml.Attr{{Name: "lines", Value: strconv.Itoa(len(rows))}}, Children: rows},
+		messageBody,
+	}}
 }
 
 func namedXrfc(parameters []cpic.NamedValue, name string) ([]byte, error) {

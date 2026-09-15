@@ -12,9 +12,12 @@
 package rfcserver
 
 import (
+	"bytes"
+	"compress/flate"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf16"
 
@@ -35,6 +38,22 @@ type Request struct {
 	Imports          []cpic.NamedValue
 	Tables           []Table
 	XrfcParameters   []cpic.NamedValue
+
+	// Compact is a recursive parameter carried as SAP Binary XML in the
+	// 0x4000 family (see wire_constants.go), already inflated if the flag
+	// said it was compressed. Nil when the call carried none. The name is
+	// inside the document — its payload root — and not on the wire.
+	Compact []byte
+
+	// Eclipse reports the call's framing: no CUT prefix, names in the byte
+	// order the opening field declares. A server answers such a call in the
+	// shape the system does, which differs from the S/4 classic envelope.
+	Eclipse bool
+	// Order is the byte order the caller's text arrived in, for reading the
+	// values of Imports; nil when the chain did not declare one.
+	Order binary.ByteOrder
+	// SessionGUID is the 0x0514 the call carried, which the answer echoes.
+	SessionGUID []byte
 }
 
 // Table is one decoded inbound table parameter.
@@ -42,6 +61,30 @@ type Table struct {
 	Name          string
 	RowByteLength int
 	Rows          [][]byte
+	// ID is the number the client gave this table (0x0330), which the answer
+	// refers to it by. Nil for a caller that did not number it.
+	ID []byte
+}
+
+// ImportText reads a character import in the caller's byte order, trailing
+// blanks removed. The second result is false when there is no such import.
+func (r Request) ImportText(name string) (string, bool) {
+	for _, p := range r.Imports {
+		if p.Name == name {
+			return decodeUTF16(p.Value, r.Order), true
+		}
+	}
+	return "", false
+}
+
+// ImportByte reads a one-byte import (an INT1 such as UCLEN); zero when absent.
+func (r Request) ImportByte(name string) byte {
+	for _, p := range r.Imports {
+		if p.Name == name && len(p.Value) == 1 {
+			return p.Value[0]
+		}
+	}
+	return 0
 }
 
 // DecodeCutFunctionRequest decodes one inbound CUT request payload (the CPIC
@@ -82,7 +125,9 @@ func DecodeFunctionRequest(payload []byte) (Request, error) {
 	chain := make([]byte, 0, len(payload)+2)
 	chain = append(chain, 0x00, 0x00)
 	chain = append(chain, payload...)
-	return decodeFunctionRequest(chain, 0x0000)
+	req, err := decodeFunctionRequest(chain, 0x0000)
+	req.Eclipse = true
+	return req, err
 }
 
 func decodeFunctionRequest(body []byte, initialPreviousTag uint16) (Request, error) {
@@ -98,11 +143,15 @@ func decodeFunctionRequest(body []byte, initialPreviousTag uint16) (Request, err
 	var haveXrfc bool
 	var cur *Table
 	var pendingXrfcData []byte
+	var compactCompressed bool
+	var compact []byte
+	var haveCompact bool
 
 	// The sender says which way round it writes text, in the opening field.
 	// TagStart is the first field of every chain, so this is known before any
 	// name is read.
 	names := utf16Order(decoded.Fields)
+	req.Order = names
 
 	for _, f := range decoded.Fields {
 		switch cpic.Tag(f.Tag) {
@@ -129,6 +178,22 @@ func decodeFunctionRequest(body []byte, initialPreviousTag uint16) (Request, err
 		case cpic.TagTableName:
 			req.Tables = append(req.Tables, Table{Name: decodeUTF16(f.Value, names)})
 			cur = &req.Tables[len(req.Tables)-1]
+		case tagTableID:
+			if cur != nil {
+				cur.ID = append([]byte(nil), f.Value...)
+			}
+		case cpic.TagSession:
+			if req.SessionGUID == nil && len(f.Value) == 16 {
+				req.SessionGUID = append([]byte(nil), f.Value...)
+			}
+		case tagCompactFlag:
+			compactCompressed = len(f.Value) == 2 && f.Value[1] == 0x01
+			haveCompact = true
+		case tagCompactRequest:
+			compact = append(compact, f.Value...)
+			haveCompact = true
+		case tagCompactEnd:
+			// nothing to do: the parameter is complete once the chain ends
 		case cpic.TagTableHeader:
 			if cur == nil || len(f.Value) < 8 {
 				return req, fmt.Errorf("%w: table header out of place", ErrRequest)
@@ -179,7 +244,38 @@ func decodeFunctionRequest(body []byte, initialPreviousTag uint16) (Request, err
 	if req.FunctionName == "" {
 		return req, fmt.Errorf("%w: request lacks a function name", ErrRequest)
 	}
+	if haveCompact {
+		if compactCompressed {
+			inflated, err := inflateBounded(compact, maxCompactBytes)
+			if err != nil {
+				return req, fmt.Errorf("%w: compact parameter: %v", ErrRequest, err)
+			}
+			compact = inflated
+		}
+		req.Compact = compact
+	}
 	return req, nil
+}
+
+// maxCompactBytes bounds an inflated compact parameter. A source file or a
+// media object is a few megabytes; this is a configured ceiling, not a claim
+// about the protocol.
+const maxCompactBytes = 64 << 20
+
+// inflateBounded reads a raw DEFLATE stream (RFC 1951, no zlib or gzip
+// framing), which is what the 0x4000 flag 01 means, and refuses more than
+// limit bytes of output.
+func inflateBounded(data []byte, limit int) ([]byte, error) {
+	r := flate.NewReader(bytes.NewReader(data))
+	defer r.Close()
+	out, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > limit {
+		return nil, fmt.Errorf("inflated payload exceeds %d bytes", limit)
+	}
+	return out, nil
 }
 
 // utf16Order reads the byte order out of the chain's opening field.
@@ -327,4 +423,47 @@ var eclipseLogonPrefix = []byte{0xd9, 0xc6, 0xc3}
 func isEclipseLogon(payload []byte) bool {
 	return len(payload) >= len(eclipseLogonPrefix) &&
 		string(payload[:len(eclipseLogonPrefix)]) == string(eclipseLogonPrefix)
+}
+
+// DescribeChainTags lists the tags a payload carries, with their lengths.
+//
+// For when a call decodes cleanly and arrives holding nothing the dispatcher
+// wanted: the decoder skips tags it has no case for, silently and by design,
+// so "no REQUEST parameter" is equally consistent with a client that sends
+// none and a decoder that has no case for the one it sent. This says which.
+//
+// Tags and lengths only. The values are an ADT request and carry a session, a
+// user and a URL, and a debugging line is not the place for them.
+func DescribeChainTags(payload []byte) string {
+	if hasCutRequestPrefix(payload) {
+		payload = payload[len(cutRequestPrefix):]
+	} else {
+		payload = append([]byte{0x00, 0x00}, payload...)
+	}
+	decoded, err := cpic.DecodeFieldChainPrefix(payload, 0x0000, uint16(cpic.TagEnd), cpic.FieldChainLimits{})
+	if err != nil {
+		if hasCutRequestPrefix(payload) {
+			return "undecodable: " + err.Error()
+		}
+		return "undecodable: " + err.Error()
+	}
+	counts := map[uint16][2]int{}
+	var order []uint16
+	for _, f := range decoded.Fields {
+		c, seen := counts[f.Tag]
+		if !seen {
+			order = append(order, f.Tag)
+		}
+		counts[f.Tag] = [2]int{c[0] + 1, c[1] + len(f.Value)}
+	}
+	parts := make([]string, 0, len(order))
+	for _, tag := range order {
+		c := counts[tag]
+		if c[0] == 1 {
+			parts = append(parts, fmt.Sprintf("%04x[%d]", tag, c[1]))
+		} else {
+			parts = append(parts, fmt.Sprintf("%04x x%d[%d]", tag, c[0], c[1]))
+		}
+	}
+	return strings.Join(parts, " ")
 }

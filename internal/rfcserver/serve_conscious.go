@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
@@ -45,6 +46,13 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 	// when the conversation is allocated
 	var sequence [2]byte
 	pingStep := 0
+	// a call that arrived in more than one record, until its last one
+	var pending []byte
+	// set once this conversation has accepted an Eclipse logon: from then on
+	// every call is Eclipse-framed, even the metadata calls whose chain opens
+	// with the same four bytes as a classic CUT prefix and so cannot be told
+	// apart from an SM59 call by their bytes alone.
+	conversationIsEclipse := false
 	for {
 		got, err := t.Receive(ctx)
 		if err != nil {
@@ -115,12 +123,29 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 		//
 		// So: recognise a logon payload before decoding it as a call, and
 		// answer it from a template the way the 0x06 0x03 branch does.
-		case len(got) > 80 && got[0] == 0x06 && got[1] == byte(0xcb): // function request
+		case len(got) > 80 && got[0] == 0x06 && (got[1] == byte(0xcb) || got[1] == byte(0x09)): // function request
+			// A call longer than one record continues in F_RECEIVE records
+			// (0x06 0x09), the way the system's own long answers do; the
+			// header's info byte says whether this record is the last. The
+			// pieces are joined before anything reads them.
+			payload := got[80:]
+			if pending != nil {
+				pending = append(pending, payload...)
+				payload = pending
+			}
+			if got[30] != recordInfoFinal {
+				if pending == nil {
+					pending = append([]byte(nil), payload...)
+				}
+				log(fmt.Sprintf("SESSION: record continues (%d bytes so far)", len(pending)))
+				continue
+			}
+			pending = nil
 			// …or a logon. Eclipse sends its logon inside an F_SAP_SEND after
 			// the conversation is already open, so the payload here is a CPIC
 			// logon rather than a call and has no CUT prefix. Told apart by
 			// that prefix rather than by length, which would be a guess.
-			if isEclipseLogon(got[80:]) {
+			if isEclipseLogon(payload) {
 				log(fmt.Sprintf("LOGON: %d bytes", len(got)-80))
 				accept, aerr := eclipseLogonAccept(got, convID, sequence, d.Identity)
 				if aerr != nil {
@@ -130,17 +155,21 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				if send(accept) != nil {
 					return
 				}
+				conversationIsEclipse = true
 				log(fmt.Sprintf("LOGON: accepted (conv=%s)", string(convID)))
 				continue
 			}
-			req, derr := DecodeFunctionRequest(got[80:])
+			req, derr := DecodeFunctionRequest(payload)
 			if derr != nil {
 				// The head, because a decode error names the rule that failed
 				// and not the bytes that failed it, and the bytes are what
 				// says which framing this actually is.
 				log(fmt.Sprintf("SESSION: decode error: %v (%d bytes, head %x)",
-					derr, len(got)-80, got[80:min(len(got), 80+48)]))
+					derr, len(payload), payload[:min(len(payload), 48)]))
 				return
+			}
+			if conversationIsEclipse {
+				req.Eclipse = true
 			}
 			fn := req.FunctionName
 			if _, ok := d.handler(fn); !ok && fn == "RFC_PING" {
@@ -155,12 +184,19 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			}
 			var respCUT []byte
 			var werr error
+			log("SESSION: " + describeRequest(req))
+			if len(req.Imports) == 0 && len(req.XrfcParameters) == 0 && len(req.Tables) == 0 && req.Compact == nil {
+				log("SESSION: tags on the wire: " + DescribeChainTags(payload))
+			}
 			if resp, excKey, cause := d.Invoke(ctx, req); excKey != "" {
 				if cause != nil {
 					log(fmt.Sprintf("SESSION: %s -> %s: %v", req.FunctionName, excKey, cause))
 				}
 				respCUT, werr = EncodeCutFunctionExceptionResponse(excKey)
 				log(fmt.Sprintf("SESSION: %s -> exception %s", fn, excKey))
+			} else if req.Eclipse {
+				respCUT, werr = EncodeEclipseResponse(resp, req)
+				log(fmt.Sprintf("SESSION: %s -> answered (%d exports, %d tables, compact %d bytes)", fn, len(resp.Exports), len(resp.Tables), len(resp.Compact)))
 			} else {
 				respCUT, werr = EncodeCutFunctionResponseS4(resp.Exports, resp.Tables, resp.XrfcParameters, guid, req.RequestedOutputs)
 				log(fmt.Sprintf("SESSION: %s -> generated (%d exports, %d tables)", fn, len(resp.Exports), len(resp.Tables)))
@@ -169,13 +205,18 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 				log("SESSION: encode error: " + werr.Error())
 				return
 			}
-			wrapped, werr := wrapFSapSend(respCUT, convID, binary.BigEndian.Uint16(got[4:6]))
+			records, werr := eclipseRecords(respCUT, convID, binary.BigEndian.Uint16(got[4:6]))
 			if werr != nil {
 				log("SESSION: wrap error: " + werr.Error())
 				return
 			}
-			if send(wrapped) != nil {
-				return
+			for _, record := range records {
+				if send(record) != nil {
+					return
+				}
+			}
+			if len(records) > 1 {
+				log(fmt.Sprintf("SESSION: %d bytes sent in %d records", len(respCUT), len(records)))
 			}
 		default:
 			// control frames need no reply
@@ -219,4 +260,43 @@ var conversationCounter atomic.Uint64
 func newConversationID() []byte {
 	n := conversationCounter.Add(1) % 100000000
 	return []byte(fmt.Sprintf("%08d", n))
+}
+
+// describeRequest names what a call actually carried.
+//
+// "the call carries no REQUEST parameter" says which parameter is missing and
+// nothing about which ones arrived, so it cannot distinguish a client that
+// sends something else from a decoder that loses the name — and for an xRFC
+// parameter the name is never on the wire at all, only in the root element of
+// the XML, so losing it is a real possibility rather than a remote one.
+func describeRequest(req Request) string {
+	var parts []string
+	if len(req.Imports) > 0 {
+		names := make([]string, 0, len(req.Imports))
+		for _, p := range req.Imports {
+			names = append(names, fmt.Sprintf("%s[%d]", p.Name, len(p.Value)))
+		}
+		parts = append(parts, "imports "+strings.Join(names, " "))
+	}
+	if len(req.XrfcParameters) > 0 {
+		names := make([]string, 0, len(req.XrfcParameters))
+		for _, p := range req.XrfcParameters {
+			names = append(names, fmt.Sprintf("%q[%d]", p.Name, len(p.Value)))
+		}
+		parts = append(parts, "xrfc "+strings.Join(names, " "))
+	}
+	if len(req.Tables) > 0 {
+		names := make([]string, 0, len(req.Tables))
+		for _, t := range req.Tables {
+			names = append(names, fmt.Sprintf("%s[%d rows]", t.Name, len(t.Rows)))
+		}
+		parts = append(parts, "tables "+strings.Join(names, " "))
+	}
+	if len(req.RequestedOutputs) > 0 {
+		parts = append(parts, "wants "+strings.Join(req.RequestedOutputs, " "))
+	}
+	if len(parts) == 0 {
+		return req.FunctionName + " carried nothing this decoder recognised"
+	}
+	return req.FunctionName + ": " + strings.Join(parts, "; ")
 }
