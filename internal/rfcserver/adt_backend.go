@@ -3,6 +3,8 @@
 package rfcserver
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +41,45 @@ type Backend struct {
 	// System ID rather than describe the backend.
 	SystemID string `json:"system_id"`
 	HostName string `json:"host_name"`
+
+	// CAFile names a PEM whose certificates are trusted for an https backend,
+	// in addition to the system roots. A lab backend behind a private
+	// certificate is reached by naming that certificate here, which keeps
+	// verification switched on — there is deliberately no flag to turn it off,
+	// because a bridge that skips verification is a bridge that can be
+	// answered by anyone on the path.
+	CAFile string `json:"ca_file"`
+	// ServerName overrides the name the certificate is checked against, for a
+	// backend reached by an address its certificate does not carry.
+	ServerName string `json:"server_name"`
+}
+
+// Transport returns the round-tripper this backend needs: the default one, or
+// one that also trusts CAFile.
+func (b Backend) Transport() (*http.Transport, error) {
+	if b.CAFile == "" && b.ServerName == "" {
+		return nil, nil
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	cfg := &tls.Config{ServerName: b.ServerName, MinVersion: tls.VersionTLS12}
+	if b.CAFile != "" {
+		pem, err := os.ReadFile(b.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("rfcserver: backend ca_file: %w", err)
+		}
+		// the system roots stay: naming a private certificate adds to what is
+		// trusted rather than replacing it
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("rfcserver: backend ca_file %s holds no certificate", b.CAFile)
+		}
+		cfg.RootCAs = pool
+	}
+	tr.TLSClientConfig = cfg
+	return tr, nil
 }
 
 // LoadBackend reads a backend description from a JSON file. The environment

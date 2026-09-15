@@ -256,3 +256,35 @@ func TestBackendWithoutCSRFStillWorks(t *testing.T) {
 		t.Fatal("a token was sent to a backend that mints none")
 	}
 }
+
+// compactGet builds a GET call in the compact framing, for tests that only
+// care about what the backend sees.
+func compactGet(t *testing.T, uri string) Request {
+	t.Helper()
+	text := func(n, v string) *bxml.Element { return &bxml.Element{Name: n, Text: v, HasText: true} }
+	doc, err := bxml.Encode(&bxml.Element{Name: "REQUEST", Children: []*bxml.Element{
+		{Name: "REQUEST_LINE", Children: []*bxml.Element{text("METHOD", "GET"), text("URI", uri), text("VERSION", "HTTP/1.1")}},
+		{Name: "HEADER_FIELDS", Attrs: []bxml.Attr{{Name: "lines", Value: "0"}}},
+		{Name: "MESSAGE_BODY"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := DecodeFunctionRequest(eclipseCall(t, eclipseCallInput{
+		function: adtRestFunction, outputs: []string{"RESPONSE"}, compact: doc, guid: bytes.Repeat([]byte{9}, 16),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+func bodyOfCompact(t *testing.T, resp Response) string {
+	t.Helper()
+	tree, err := bxml.Decode(resp.Compact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := bxml.PayloadRoot(tree)
+	return root.Child("MESSAGE_BODY").Body
+}

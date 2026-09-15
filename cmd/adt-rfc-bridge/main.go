@@ -120,7 +120,15 @@ func main() {
 				conn.Close()
 				return
 			}
-			handler, err := rfcserver.ADTRestHandler(target, &http.Client{Timeout: *timeout, Jar: jar})
+			client := &http.Client{Timeout: *timeout, Jar: jar}
+			if tr, terr := target.Transport(); terr != nil {
+				log.Printf("adt-rfc-bridge: %s: %v", peer, terr)
+				conn.Close()
+				return
+			} else if tr != nil {
+				client.Transport = tr
+			}
+			handler, err := rfcserver.ADTRestHandler(target, client)
 			if err != nil {
 				log.Printf("adt-rfc-bridge: %s: %v", peer, err)
 				conn.Close()
