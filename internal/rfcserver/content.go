@@ -15,10 +15,6 @@ import (
 	"github.com/oisee/open-rfc-go/internal/transport"
 )
 
-// niPing and niPong are the 8-byte NI keepalive frames ("NI_PING\0"/"NI_PONG\0").
-var niPing = mustHex("4e495f50494e4700")
-var niPong = mustHex("4e495f504f4e4700")
-
 // scriptStep is one step of a function's recorded reply script: a frame to send
 // to the client (send=true) or one to expect and consume from it (a callback
 // response, send=false).
@@ -196,11 +192,12 @@ func ServeContentAddressed(conn net.Conn, t *Templates, logf func(string)) {
 				return
 			}
 			log("CONNECT: gateway acknowledged")
-		case len(got) == 8 && bytes.Equal(got, niPing):
-			if tr.Send(niPong) != nil {
+		case Classify(got) == FrameNIPing:
+			if tr.Send(NIPong) != nil {
 				return
 			}
-		case len(got) == 8: // NI_PONG or other keepalive — no reply
+		case Classify(got) == FrameNIPong, Classify(got) == FrameShortKeepalive:
+			// The peer answering our keepalive, or another short frame: nothing owed.
 		case isInit(got):
 			convID = append([]byte(nil), got[40:48]...)
 			guid = findRFCGUID(got)

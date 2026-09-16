@@ -2,7 +2,7 @@
 
 Status: in progress (M8). Captured live against A4H (SAP_BASIS 793) on
 2026-08-19. This records what the wire actually requires, learned by standing
-`cmd/rfc-lab` in front of a real SM59 destination and reading the errors.
+`cmd/orfc-lab` in front of a real SM59 destination and reading the errors.
 
 ## Goal
 
@@ -11,7 +11,7 @@ Go code — not by a real system behind a transparent proxy.
 
 ## Setup
 
-`cmd/rfc-lab` binds several ports on one host; the SM59 connection type / system
+`cmd/orfc-lab` binds several ports on one host; the SM59 connection type / system
 number selects the mode:
 
 | SM59 | port | mode | who answers |
@@ -77,7 +77,7 @@ response — not replayed. That is the next M8 build.
   non-NI transports (WebSocket/HTTP).
 - `internal/rfcserver`: `ServeReplay` (request-driven, conv-id + RFC-GUID
   rewriting), `LoadConnection` (segments by connection id).
-- `cmd/rfc-lab`: multi-protocol endpoint (type 3 sniff, type 3 our server,
+- `cmd/orfc-lab`: multi-protocol endpoint (type 3 sniff, type 3 our server,
   type H/G HTTP, type W WebSocket).
 - `cmd/rfc-server`: standalone replay server.
 
@@ -208,7 +208,7 @@ generation. Captures preserved at /tmp/gold-program.jsonl and /tmp/gold-params.j
 
 ## MILESTONE — a real ABAP RFC program runs fully green against our Go server
 
-The content-addressed responder (`ServeContentAddressed`, rfc-lab system number
+The content-addressed responder (`ServeContentAddressed`, orfc-lab system number
 12) makes the live `ZLOCAL_RFC_TEST` program complete **all six calls rc=0**
 answered by our Go — RFC_PING, RFC_SYSTEM_INFO, STFC_CONNECTION (with its
 server→client callback), STFC_STRUCTURE (structure), RFC_READ_TABLE (17 cols × 2
@@ -241,7 +241,7 @@ different bytes from the normal path (accept 807B, RFC_SYSTEM_INFO=746B) for the
 *same* functions. So the responder keys reply scripts by "acceptLen|FUNCTION" (the
 accept in effect = the mode) and ingests several captures at once.
 
-Result: a single endpoint (rfc-lab sys 12) now answers, all green from our Go —
+Result: a single endpoint (orfc-lab sys 12) now answers, all green from our Go —
 **Connection Test, Unicode Test, Fast Serialization Test, and the full
 ZLOCAL_RFC_TEST program** — across three serialization modes (807 normal, 811/834
 fast-ser, 817/1079 handshake tests). Step 1 (addressable content) is complete for

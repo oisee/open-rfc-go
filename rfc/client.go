@@ -37,11 +37,11 @@ type PoolConfig struct {
 
 // Destination describes how to reach and log on to a system.
 type Destination struct {
-	Host             string // gateway host
-	Port             int    // gateway port (e.g. 3300 for instance 00)
-	Client           string // ABAP client, e.g. "001"
-	User             string
-	Password         string
+	Host     string // gateway host
+	Port     int    // gateway port (e.g. 3300 for instance 00)
+	Client   string // ABAP client, e.g. "001"
+	User     string
+	Password string
 	// Ticket logs on with an SAP logon ticket (MYSAPSSO2) instead of a password,
 	// for systems where a browser single sign-on is the only credential to hand.
 	// Any wire form is accepted; see internal/cpic NormalizeTicket.

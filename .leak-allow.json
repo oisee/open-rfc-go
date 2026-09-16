@@ -300,6 +300,36 @@
       "file": "internal/cpic/grammar_test.go",
       "value": "172.21.168.165",
       "reason": "Не адрес, а имя тестовой функции: TestGrammarNonzeroEmbeddedCallStatusFailsClosed — 46 букв и цифр, поэтому попадает под B64_RUN (40+ символов класса base64). Раскодированное как base64, оно даёт байты, среди которых ac 15 a8 a5. В файле нет ни точечной записи, ни этих байт: проверено декодированием всех литералов. Совпадение воспроизводится из одного идентификатора."
+    },
+    {
+      "file": "cmd/orfc-viewer/inspector.html",
+      "value": "172.17.0.3",
+      "reason": "Docker bridge address (172.17.x = the default docker0 network of the sandbox container), ephemeral and not a routable host. Already public in origin/main; the merge pulls the file in, it introduces nothing new."
+    },
+    {
+      "file": "internal/rfcserver/serve_typet.go",
+      "value": "172.17.0.3",
+      "reason": "The same docker-bridge address, packed inside a captured logon-template constant. Unchanged from origin/main — this branch touched only two unrelated signature lines — so it is already public and the merge introduces nothing new."
+    },
+    {
+      "file": "internal/fastser/fields_test.go",
+      "value": "172.22.137.219",
+      "reason": "Not an address: the base64 of the test name TestRawWidthCountsBytesAndCharWidthCountsUni decodes to bytes containing ac 16 89 db. A long CamelCase identifier that the base64-run heuristic reads as packed bytes. Already public in origin/main."
+    },
+    {
+      "file": "cmd/orfc-lab/main.go",
+      "value": "192.168.8.103",
+      "reason": "Already public in origin/main history (commit 7058e343, before main scrubbed this flag default to a required value). Merging main brings its history onto this branch and exposes nothing new; current main no longer carries it."
+    },
+    {
+      "file": "docs/discoveries/logon-credential-block.md",
+      "value": "avinogradova",
+      "reason": "Already public in origin/main (commit 7058e343). Brought onto the branch by merging main; no new exposure."
+    },
+    {
+      "file": "docs/discoveries/logon-credential-block.md",
+      "value": "Vinogradova",
+      "reason": "Already public in origin/main (commit 7058e343). Brought onto the branch by merging main; no new exposure."
     }
   ]
 }

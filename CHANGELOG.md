@@ -7,12 +7,177 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
+  reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
+  unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards
+  it to `--backend`, and wraps the answer. New package `internal/bxml` (SAP
+  Binary XML), the dictionary bootstrap handlers, the CSRF dance, and an
+  `https` backend by named certificate. See open-steamgate `docs/adt-over-rfc.md`.
+
 - `ni`, `wire` and `sniffer` are public packages now, moved out of `internal/`.
   They are the NI framing, the bounds-checked byte reader/writer and the
   framing-aware proxy, and a second protocol on the same transport — DIAG,
   in open-diag-go-pro — wants all three. Import paths change from
   `internal/ni` to `ni`, and likewise for the other two; nothing else does.
 
+## v0.2.0 — the fast serializer, decoded — 2026-08-23
+
+SAP's fast RFC serialization stops being opaque. What was a wall of bytes a day
+ago is now a grammar with tests against live captures.
+
+### The record grammar
+
+Tag-dependent — there is no single length rule:
+
+```
+0x43 'C' char        <len:1> 0x80 <len bytes>   one byte per char, not UTF-16
+0x4e 'N' int4        <4 bytes> little-endian    fixed width, no length
+0x50 'P' descriptor  <len:1> "\TYPE=..."
+0x30 '0' padded      <len:2 BE> <value>
+0x53 'S' STRING      <0xC000|len:LE16> <len:LE16> <value>
+0x45 'E' end         no value
+```
+
+### The field-description list, and the type codes
+
+Behind a descriptor sits a list, not more records:
+
+```
+0x44 'D' <fieldcount:1>  0x50 'P' <len> "\TYPE=..."
+then fieldcount times:   <typecode:1> [<width:2 LE>] <namelen:1> <NAME>
+```
+
+The type codes are cross-checked field for field against the live system's DDIC
+using `RFCTEST`, which carries a spread of them in one announcement: `0x01` INT1,
+`0x02` INT2, `0x03` INT4, `0x06` CHAR, `0x0c` DATS, `0x0e` TIMS, `0x13` FLTP,
+`0x17` RAW, `0x18` STRING, `0x19` XSTRING.
+
+**Two width conventions, and they differ.** `CHAR` counts UTF-16 units, so
+`CHAR(50)` travels as 100; `RAW` counts bytes, so `RAW(3)` travels as 3. Both sit
+in that one structure. A decoder that doubles everything gets every hex field
+wrong by a factor of two.
+
+The field count is a usable checksum: over 434 descriptors the recovered list
+length matches exactly, with every mismatch in a compressed frame and none below
+the threshold.
+
+### `0x5001` is not a container
+
+It is one id of a general item grammar, `<id:2 BE> <len:2 BE> <data> <id:2 BE>`,
+where the id repeats as a closing tag. That also explains a puzzle that stalled an
+earlier pass: scanning a frame for `0x5001` finds every item twice, and reading a
+closing tag as an opening one takes the next item's id for a length.
+
+### The compression is LZ4
+
+The published block format, above 512 bytes of payload, intrinsic to the
+serializer — SM59's "Deactivate RFC Compression" does nothing to it. Blocks are
+located by eight bytes immediately before them carrying both sizes, and every
+compressed block in the captures decodes to exactly its declared uncompressed size
+while consuming exactly its declared compressed size.
+
+This supersedes the earlier note that decompression would be a substantial
+separate project. It also unlocked the type table above: structures never travel
+below the threshold here, so that field list was unreadable until the decoder
+existed.
+
+### How it was found, and four readings that were wrong
+
+Controlled differentials — vary one parameter, hold everything else, capture both
+ends. Byte archaeology on large frames failed at the same questions this answered
+in minutes.
+
+Then adversarial review: independent agents assigned to *refute* each claim
+against the whole corpus. Every wrong reading fit the samples that had been
+looked at, and each was killed by a frame nobody had opened. Four are recorded in
+`docs/discoveries/serializer-selection.md` so they are not rediscovered:
+byte-stepping resynchronisation, `0x03` as a "name tag", a width reading
+"refuted" by a probe whose declarations never reached the wire, and guessing a
+block's length when LZ4's final sequence makes several wrong lengths look valid.
+
+Decode only. We do not yet produce fast serialization, and the client negotiates
+classic, so none of this is on the client's critical path today.
+
+## v0.1.0 — first tagged preview — 2026-08-22
+
+The first version with a name and a number. Still a research preview: `0.x` means
+the API may move, and classic RFC still has no transport encryption.
+
+**The shipped binary is `orfc`** — **o**pen-**rfc**, so the attribution rides in
+the name. It is both the CLI and, as `orfc mcp`, the MCP server — one binary, two
+modes, like `vsp`. Plain `rfc` collides with the IETF sense of the word on a
+`PATH` and says nothing about whose RFC it speaks; naming it after either mode
+(`rfc-mcp`, `mcp-rfc`) would bake half the tool into the name; and a
+`sap`-prefixed name was dropped because it mirrors SAP's own binaries
+(`saprouter`, `sapcar`, `saplogon`) and so implies an origin the `NOTICE`
+explicitly disclaims.
+
+The whole family moved to that root, so there is one instead of two: `orfc`,
+`orfc-srv`, `orfc-lab`, `orfc-sniff`, `orfc-viewer`, `orfc-ticketcatch`.
+
+**`orfc-srv` is new** — the server front door, in either role a destination can
+address:
+
+```sh
+orfc-srv -mode typet -listen :3300   # registered external server (SM59 type T)
+orfc-srv -mode type3 -listen :3313   # an ABAP system            (SM59 type 3)
+```
+
+Point an SM59 destination at it and every `CALL FUNCTION … DESTINATION` lands in
+the dispatcher, so a Z function module can be exercised against this
+implementation **without a second SAP system**. Unknown modules raise
+`FU_NOT_FOUND` rather than dropping the connection, so the request stays in the
+capture. The type-T role previously had its own binary and the type-3 server was
+reachable only inside the lab tool.
+
+Getting it running against a system is now written down:
+[`docs/quickstart-a4h.md`](docs/quickstart-a4h.md).
+
+### Serialization, mapped end to end
+
+All four of SAP's serializers can be selected on demand, and what each puts on
+the wire is recorded. The controlling fact was not where anyone expected: the
+destination has **two** independent knobs and the second overrides the first,
+which is why a destination can display *"Fast serializer"* while storing a value
+that means something else. Details in
+[`docs/discoveries/serializer-selection.md`](docs/discoveries/serializer-selection.md).
+
+With that settled, a controlled differential — vary one parameter, hold the rest,
+capture both ends — produced the **fast serializer's record grammar**:
+
+- framing is **tag-dependent**; there is no single length rule
+- `INT4` is little-endian and fixed-width; `char`, `STRING` and `XSTRING` cost
+  **one byte per unit** — not UTF-16, and not padded to the declared width
+- the version handshake is deterministic and negotiates `FAST_SER_VERS = 3`
+- payloads above **512 bytes are compressed**, and that is intrinsic to the
+  serializer rather than a switchable transport feature
+
+Decoded, not produced. The client negotiates classic, so none of the fast
+serializer's compression has ever applied to the client leg.
+
+### Roles, written down
+
+[`docs/role-state-machines.md`](docs/role-state-machines.md) records who may send
+what and when: the client setup machine's transitions with the wire rule behind
+each invariant, all seven server roles and where each gets its replies, both
+handshake shapes, and the keepalive rule — answer every ping, never answer a
+pong, never parse an eight-byte frame as a record. Forgetting it stalls a
+conversation rather than failing it, which reads like a decode bug and is not one.
+
+Internally the roles now share one frame classifier. The eight keepalive bytes
+had been declared twice under different names, which is exactly how one role gets
+a fix the others miss.
+
+### Also in this release
+
+- `internal/fastser` decodes the record grammar: type descriptors, field names,
+  `char`, `INT4`, `STRING`, and the end marker, with a coverage count so "how
+  much of this do we actually model" is answerable rather than assumed
+- the delta manager is understood: it elides on the **response** side, and its
+  degenerate full-table form is what a server may always emit — so it never
+  blocked the server track
+- classic is complete for the synchronous path, re-verified live: scalar
+  `STRING` and `XSTRING`, and deep structures carrying both
 ## Client — ADT REST over classic RFC — 2026-08-21
 
 A real ADT REST request now travels through the classic-RFC tunnel:
@@ -77,7 +242,7 @@ open-rfc-go now speaks classic RFC **as the server**, not only the client.
 - Request decoding needed no new code: the existing classic decoder reads live
   ABAP fast-serialized requests with zero errors.
 - New: `internal/rfcserver` (ServeReplay / ServeSmart / ServeContentAddressed),
-  `internal/sniffer` per-connection tagging + raw-tee, and `cmd/rfc-lab`, a
+  `internal/sniffer` per-connection tagging + raw-tee, and `cmd/orfc-lab`, a
   multi-protocol endpoint (type 3 sniff/replay/smart/content, HTTP, WebSocket).
 - Known next step: a fast-ser codec that **generates** responses from values (so
   it works for inputs never captured), then real Go/JS function implementations

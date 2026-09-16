@@ -28,3 +28,9 @@ testdata/fuzz/
 # Operational scratch: captures, credentials, anything with live identifiers.
 # Never tracked; see the leak scan.
 .local/
+
+# build artifacts and local scratch (never commit)
+/adt-rfc-bridge
+/rfc-tap
+/cmd/rfc-tap/
+/scripts/

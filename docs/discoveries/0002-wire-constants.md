@@ -102,7 +102,7 @@ the client send fast-ser parameters regardless of its Classic preference.
 
 ## How each was learned
 
-By capturing live traffic (`cmd/rfc-sniffer` / `cmd/rfc-lab`), decoding it with
+By capturing live traffic (`cmd/rfc-sniffer` / `cmd/orfc-lab`), decoding it with
 this project's own codecs, and diffing sessions to separate constant structure
 from per-session tokens. Provenance for each is the capture and the diff recorded
 in [0001](0001-live-type3-server.md); none of these values comes from SAP

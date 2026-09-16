@@ -1,6 +1,6 @@
 # What the logon credential block actually varies
 
-Captured 2026-08-21 against A4H (SAP_BASIS 758) with `cmd/rfc-lab` between SM59
+Captured 2026-08-21 against A4H (SAP_BASIS 758) with `cmd/orfc-lab` between SM59
 and the gateway: nine connection tests of one type-3 destination, in three
 groups of three — a short user with a password, the same destination with
 *Current User* and no password, and a long user with a password.
@@ -19,7 +19,7 @@ Everything else is identical, field for field.
 Two things follow.
 
 **The user field is UTF-16.** `CLAUDE` is six characters and twelve bytes;
-`AVINOGRADOVA` is twelve and twenty-four. Our encoder writes ASCII there and the
+`LONGUSERNAME` is twelve and twenty-four. Our encoder writes ASCII there and the
 system has never complained, which says the field is tolerant, not that it is
 ASCII.
 
