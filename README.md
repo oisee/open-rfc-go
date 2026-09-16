@@ -4,6 +4,25 @@ A pure-Go, **SDK-free** implementation of SAP classic synchronous RFC — client
 **and** server. No NW RFC SDK, no native library, no cgo. A Go port of
 [`open-rfc`](https://github.com/marianfoo/open-rfc).
 
+> ## 🎉 Eclipse ABAP Development Tools, over RFC — `cmd/adt-rfc-bridge`
+>
+> **2026-09-16 — a stock Eclipse ABAP project logs on, browses the repository
+> and opens a source through a Go gateway, over RFC, and does not know it is not
+> a SAP system.** An Eclipse **Custom Application Server** project never opens an
+> HTTP port: it logs on over RFC on the gateway port and tunnels every ADT
+> request inside one RFC call (`SADT_REST_RFC_ENDPOINT`). `cmd/adt-rfc-bridge`
+> terminates that RFC conversation and forwards the HTTP exchange inside it to
+> any `--backend` — a real system, or the sibling
+> [open-steamgate](https://github.com/oisee/open-steamgate)'s offline ADT
+> façade. Measured end to end: logon, discovery, identity, the tree expanded, a
+> source opened, unit-test metadata and check runs — all answered, zero SAP
+> libraries. Four things each refuse in silence and each was found by measuring:
+> the dictionary bootstrap Eclipse insists on, the SAP Binary XML the payload is
+> made of, the gateway record header (two shapes, two connection roles), and the
+> CSRF dance, which over RFC is the bridge's because the client has no HTTP
+> session. The protocol facts are written down in
+> [open-steamgate's `docs/adt-over-rfc.md`](https://github.com/oisee/open-steamgate/blob/main/docs/adt-over-rfc.md).
+
 > ## 🎉 Call any SAP function module — from Go, the shell, or as MCP tools
 >
 > **2026-08-20 — the client now calls essentially any FM, and an MCP server turns
