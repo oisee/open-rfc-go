@@ -47,5 +47,5 @@ jobs:
       # short fuzz run. It is not a substitute for a scheduled longer one.
       - name: Fuzz decoders briefly
         run: |
-          go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
-          go test ./internal/ni -run TestX -fuzz FuzzFrameRoundTrip -fuzztime 60s
+          go test ./ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
+          go test ./ni -run TestX -fuzz FuzzFrameRoundTrip -fuzztime 60s

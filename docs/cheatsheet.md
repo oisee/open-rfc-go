@@ -235,7 +235,7 @@ gofmt -l .                                   # must print nothing
 go vet ./...
 go test -cover ./internal/...
 go test ./conformance/...                    # language-neutral wire vectors
-go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
+go test ./ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
 go test -race -run TestDecodesFragmented ./internal/ni -v    # one test
 ```
 

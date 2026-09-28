@@ -60,8 +60,8 @@ have these; Go gives them away, and a length-prefixed binary protocol is exactly
 what they are for.
 
 ```sh
-go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
-go test ./internal/ni -run TestX -fuzz FuzzFrameRoundTrip     -fuzztime 60s
+go test ./ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
+go test ./ni -run TestX -fuzz FuzzFrameRoundTrip     -fuzztime 60s
 ```
 
 `-run TestX` matches no test, so only the fuzz target runs.
