@@ -7,6 +7,14 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `rfc.Destination.CpicStreaming` (and `SessionOptions.CpicStreaming`): the
+  opt-in that open-rfc's `cpicStreaming: "enabled"` is. An outgoing call whose
+  application data exceeds the compact 28000-byte slice was refused with "CPIC
+  streaming is disabled" whatever the destination accepted; with the option it
+  is streamed as F_ASEND_DATA/F_SEND_DATA/F_RECEIVE, which `internal/appc`
+  already planned. Off by default. Seen live on SAP_BASIS 740 SP06 and 750
+  through a SAProuter, for messages of up to 258 KB.
+
 - `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
   reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
   unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards
