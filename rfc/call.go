@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
@@ -16,6 +17,7 @@ import (
 	"github.com/oisee/open-rfc-go/internal/metadata"
 	"github.com/oisee/open-rfc-go/internal/rfctypes"
 	"github.com/oisee/open-rfc-go/internal/structure"
+	"github.com/oisee/open-rfc-go/internal/value"
 	"github.com/oisee/open-rfc-go/internal/xrfc"
 )
 
@@ -269,6 +271,15 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %s expects a numeric string", ErrProtocol, p.ParameterName)
 		}
+		// NUMC is decimal digits only. Padding anything else manufactures a
+		// plausible numeral out of a non-number, which is why upstream asserts
+		// /^\d*$/u before it pads. A byte test is equivalent: every non-ASCII
+		// byte is above '9'.
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return nil, fmt.Errorf("%w: %s expects at most %d decimal digits", ErrProtocol, p.ParameterName, n)
+			}
+		}
 		if len(s) > n {
 			return nil, fmt.Errorf("%w: %s does not fit NUMC(%d)", ErrProtocol, p.ParameterName, n)
 		}
@@ -276,7 +287,7 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 	case "I":
 		v, ok := asInt32(val)
 		if !ok {
-			return nil, fmt.Errorf("%w: %s expects an integer", ErrProtocol, p.ParameterName)
+			return nil, fmt.Errorf("%w: %s must be an integer in %d..%d", ErrProtocol, p.ParameterName, math.MinInt32, math.MaxInt32)
 		}
 		b := make([]byte, 4)
 		binary.LittleEndian.PutUint32(b, uint32(v))
@@ -300,6 +311,12 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %s expects a string", ErrProtocol, p.ParameterName)
 		}
+		// The trailing NUL is the wire's terminator, so a NUL inside the value
+		// would truncate it at the peer. Upstream asserts the same predicate
+		// (assertNulFreeUnicodeScalarText) before appending its terminator.
+		if err := value.AssertNulFreeUnicodeScalarText(s, p.ParameterName); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProtocol, err)
+		}
 		return append([]byte(s), 0), nil
 	case "y":
 		// XSTRING: variable-length raw bytes.
@@ -312,11 +329,36 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		// DATE(D)/TIME(T)/packed DEC(P, incl. TIMESTAMP)/FLOAT(F)/INT1,2,8/
 		// DECF16,34/UTCLONG(p): reuse the per-field structure codec via a
 		// single-field layout. The value types match those used inside structures.
-		b, err := structure.Encode(scalarFieldDef(p, n), map[string]any{"V": val})
+		// The width must be converted first, see scalarByteWidth.
+		b, err := structure.Encode(scalarFieldDef(p, scalarByteWidth(p, n)), map[string]any{"V": val})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s scalar type %s: %v", ErrProtocol, p.ParameterName, p.Exid, err)
 		}
 		return b, nil
+	}
+}
+
+// scalarByteWidth converts a function parameter's logical character width into
+// the byte width the per-field structure codec expects.
+//
+// The two types disagree on the unit of their same-named InternalLength: a
+// FunintParameter carries C/N/D/T in characters, because the metadata reader
+// halves the Unicode byte width RFC_METADATA_GET reports
+// (metadata.normalizedFunctionInternalLength) — the classic codec applies the
+// two-bytes-per-character factor itself — while an RfcStructureField carries
+// Unicode bytes and the codec asserts that. Only DATE and TIME reach the codec
+// from the character group, since CHAR and NUMC have fast paths, and both are
+// fixed by the type, so their byte width does not move with what a peer reports.
+// Upstream applies the same reasoning when it writes D as 8 characters and T as
+// 6 (classic-invocation.ts).
+func scalarByteWidth(p classicrfc.FunintParameter, charWidth int) int {
+	switch p.Exid {
+	case "D":
+		return 16
+	case "T":
+		return 12
+	default:
+		return charWidth
 	}
 }
 
@@ -501,11 +543,13 @@ func decodeScalar(p classicrfc.FunintParameter, b []byte) (any, error) {
 		return append([]byte(nil), b...), nil
 	default:
 		// DATE/TIME/packed DEC/FLOAT/INT1,2,8/DECF/UTCLONG: decode through the
-		// per-field structure codec, sized to the actual value bytes. Fall back
-		// to raw bytes if the per-field codec cannot read it.
+		// per-field structure codec, sized to the actual value bytes. A codec
+		// rejection is a protocol error, not a reason to hand back raw bytes:
+		// upstream's decodeScalar throws on every malformed width, so a fallback
+		// here would report undecodable input as a successfully decoded value.
 		m, err := structure.Decode(scalarFieldDef(p, len(b)), b)
 		if err != nil {
-			return append([]byte(nil), b...), nil
+			return nil, fmt.Errorf("%w: %s scalar type %s: %v", ErrProtocol, p.ParameterName, p.Exid, err)
 		}
 		return m["V"], nil
 	}
@@ -514,14 +558,25 @@ func decodeScalar(p classicrfc.FunintParameter, b []byte) (any, error) {
 func asInt32(v any) (int32, bool) {
 	switch n := v.(type) {
 	case int:
-		return int32(n), true
+		return narrowInt32(int64(n))
 	case int32:
 		return n, true
 	case int64:
-		return int32(n), true
+		return narrowInt32(n)
 	default:
 		return 0, false
 	}
+}
+
+// narrowInt32 keeps INT4's own bounds. Upstream applies the same range at the
+// call site (scalarInteger(..., -0x8000_0000, 0x7fff_ffff)) before writeInt32LE,
+// so an out-of-range value is refused rather than wrapped into a different
+// number that the peer echoes back as success.
+func narrowInt32(n int64) (int32, bool) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, false
+	}
+	return int32(n), true
 }
 
 // isStructureExid reports whether a parameter's EXID denotes a nested structure
