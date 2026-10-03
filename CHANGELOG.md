@@ -7,6 +7,21 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `rfc`: five scalar encode/decode defects are fixed. A DATE or TIME parameter was
+  encoded with a character width where the codec wanted bytes, so any call with a
+  temporal parameter failed locally with `DATE must occupy 16 Unicode bytes` and
+  never reached SAP. INT4 silently truncated out-of-range values, NUMC zero-padded
+  non-digits, a STRING containing NUL was cut short at the peer, and
+  `decodeScalar` returned undecodable input as raw bytes with a nil error. All
+  five arrived with the port; the TypeScript implementation already behaves
+  correctly, so nothing is owed upstream. See `docs/provenance.md`.
+
+  Three of the five are a compatibility change for callers: an out-of-range INT4
+  (`3000000000`), a NUMC carrying non-digits (`"AB"`), and a STRING containing NUL
+  were previously altered silently and sent to SAP; they are now refused locally
+  with an error wrapping `ErrProtocol`. Callers still on v0.2.0 will see failures
+  where they previously saw silent alteration.
+
 - `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
   reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
   unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards
