@@ -7,20 +7,36 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/oisee/open-rfc-go/internal/metadata"
 	"github.com/oisee/open-rfc-go/internal/rfctypes"
 	"github.com/oisee/open-rfc-go/internal/xrfc"
 )
 
 // The fixture is a verbatim RFC_METADATA_GET (DEEP='X') response for
-// SADT_REST_RFC_ENDPOINT, captured on a NW 7.5x system. It carries both wire
-// forms of numeric cells: JSON numbers in PARAMETERS (INTLENGTH, OFFSET, ...)
-// and digit strings in DATATYPESCONT (INTLEN, OFFSET, ...).
+// SADT_REST_RFC_ENDPOINT, captured on an S/4HANA system (SAP_BASIS 816). It
+// carries both wire forms of numeric cells: JSON numbers in PARAMETERS
+// (INTLENGTH, OFFSET, ...) and digit strings in DATATYPESCONT (INTLEN,
+// OFFSET, ...).
 func sadtCapture(t *testing.T) []byte {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/sadt_rest_rfc_endpoint.json")
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return raw
+}
+
+// sadtCapture740 is the same response captured on an ECC system (SAP_BASIS
+// 740, kernel 742, Unicode). Its DDIC timestamps differ, and it lacks the
+// EX_FUNCTIONS, EX_TYPES and EX_TYPE_ERRORS tables that later releases of
+// RFC_METADATA_GET return, empty, alongside the others.
+func sadtCapture740(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/sadt_rest_rfc_endpoint_740.json")
 	if err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
@@ -225,4 +241,46 @@ func TestSeededGraphResolvesBothParameters(t *testing.T) {
 	if len(encoded) == 0 {
 		t.Fatal("empty encoding")
 	}
+}
+
+// TestSeedIsTheSameAcrossReleases pins the claim a seed rests on: the
+// SADT_REST_RFC_ENDPOINT contract does not change between releases. A seed
+// captured on SAP_BASIS 740 and one captured on 816 must normalize to the same
+// interface and the same type graph, so one embedded seed serves both.
+func TestSeedIsTheSameAcrossReleases(t *testing.T) {
+	c816, c740 := seedableClient(), seedableClient()
+	if err := c816.SeedMetadata(sadtCapture(t)); err != nil {
+		t.Fatalf("SeedMetadata 816: %v", err)
+	}
+	if err := c740.SeedMetadata(sadtCapture740(t)); err != nil {
+		t.Fatalf("SeedMetadata 740: %v", err)
+	}
+
+	f816, _ := c816.cachedFn("SADT_REST_RFC_ENDPOINT")
+	f740, _ := c740.cachedFn("SADT_REST_RFC_ENDPOINT")
+	if !reflect.DeepEqual(f816, f740) {
+		t.Errorf("interfaces differ:\n816: %+v\n740: %+v", f816, f740)
+	}
+	g816, _ := c816.cachedGraph("SADT_REST_RFC_ENDPOINT")
+	g740, _ := c740.cachedGraph("SADT_REST_RFC_ENDPOINT")
+	if !reflect.DeepEqual(*g816.FunctionIdentity, *g740.FunctionIdentity) {
+		t.Errorf("function identities differ: 816 %+v, 740 %+v", *g816.FunctionIdentity, *g740.FunctionIdentity)
+	}
+	if l816, l740 := graphLayout(g816), graphLayout(g740); !reflect.DeepEqual(l816, l740) {
+		t.Errorf("type graphs differ:\n816: %+v\n740: %+v", l816, l740)
+	}
+}
+
+// graphLayout is a graph with what legitimately differs between systems
+// removed: the DDIC timestamp of each type, which records when a system
+// activated it, not what it looks like.
+func graphLayout(g metadata.Graph) metadata.Graph {
+	g.FunctionIdentity = nil
+	nodes := make(map[string]metadata.TypeNode, len(g.Nodes))
+	for name, node := range g.Nodes {
+		node.Timestamp = ""
+		nodes[name] = node
+	}
+	g.Nodes = nodes
+	return g
 }
