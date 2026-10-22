@@ -5,11 +5,13 @@ package rfcserver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -78,6 +80,23 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		}
 		client = &http.Client{Jar: jar}
 	}
+	// A supplied client can also be used elsewhere; confine this handler without
+	// changing that client's redirect policy. Probes use this same guarded copy.
+	confined := *client
+	redirect := client.CheckRedirect
+	confined.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := admitBackendURL(base, req.URL); err != nil {
+			return err
+		}
+		if redirect != nil {
+			return redirect(req, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("%w: too many redirects", ErrADTTarget)
+		}
+		return nil
+	}
+	client = &confined
 	graph := ADTRestGraph()
 	csrf := &csrfState{}
 
@@ -155,6 +174,11 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 			if err != nil {
 				return Response{}, fmt.Errorf("rfcserver: the backend did not answer: %w", err)
 			}
+		}
+		// A successful exchange can rotate the token together with the session
+		// cookies. Keeping the old token would pair it with the jar's new session.
+		if token := answer.Header.Get("X-CSRF-Token"); answer.StatusCode >= 200 && answer.StatusCode < 300 && isCSRFToken(token) {
+			csrf.set(token)
 		}
 		defer answer.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(answer.Body, adtMaxBodyBytes))
@@ -281,8 +305,15 @@ func httpRequestOf(ctx context.Context, base *url.URL, decoded any) (*http.Reque
 	if err != nil {
 		return nil, fmt.Errorf("rfcserver: REQUEST_LINE URI %q: %w", target, err)
 	}
+	if ref.IsAbs() || ref.Host != "" || ref.User != nil || ref.Opaque != "" || strings.HasPrefix(target, "//") {
+		return nil, fmt.Errorf("%w: REQUEST_LINE URI must be a path and query", ErrADTTarget)
+	}
+	resolved := base.ResolveReference(ref)
+	if err := admitBackendURL(base, resolved); err != nil {
+		return nil, err
+	}
 	body, _ := fields["MESSAGE_BODY"].([]byte)
-	outgoing, err := http.NewRequestWithContext(ctx, method, base.ResolveReference(ref).String(), bytes.NewReader(body))
+	outgoing, err := http.NewRequestWithContext(ctx, method, resolved.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("rfcserver: %w", err)
 	}
@@ -294,13 +325,39 @@ func httpRequestOf(ctx context.Context, base *url.URL, decoded any) (*http.Reque
 		if name == "" || strings.Contains(hopByHop, strings.ToLower(name)) {
 			continue
 		}
-		if strings.EqualFold(name, "Host") {
-			outgoing.Host = value
+		if strings.EqualFold(name, "Host") || strings.EqualFold(name, "Authorization") || strings.EqualFold(name, "Cookie") {
 			continue
 		}
 		outgoing.Header.Add(name, value)
 	}
 	return outgoing, nil
+}
+
+// ErrADTTarget identifies requests and redirects outside the backend boundary.
+var ErrADTTarget = errors.New("rfcserver: ADT target outside configured backend")
+
+func admitBackendURL(base, target *url.URL) error {
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if u.Scheme == "https" {
+			return "443"
+		}
+		return "80"
+	}
+	if !strings.EqualFold(base.Scheme, target.Scheme) || !strings.EqualFold(base.Hostname(), target.Hostname()) || port(base) != port(target) || target.User != nil {
+		return fmt.Errorf("%w: origin changed", ErrADTTarget)
+	}
+	// Captured ADT request lines start at /sap/bc/adt. Keep that root-relative
+	// form with a configured base path: it restricts access, rather than being a prefix to
+	// prepend. Clean decoded paths too, so escaped dot segments cannot escape.
+	prefix := path.Clean("/" + strings.TrimPrefix(base.Path, "/"))
+	actual := path.Clean("/" + strings.TrimPrefix(target.Path, "/"))
+	if prefix != "/" && actual != prefix && !strings.HasPrefix(actual, prefix+"/") {
+		return fmt.Errorf("%w: path outside backend base path", ErrADTTarget)
+	}
+	return nil
 }
 
 func responseValue(answer *http.Response, body []byte) map[string]any {

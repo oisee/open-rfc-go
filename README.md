@@ -28,6 +28,13 @@ serializer writes it. We took it off the wire — see
 > source opened, unit-test metadata and check runs — all answered, zero SAP
 > libraries. The protocol facts are written down in
 > [open-steamgate's `docs/adt-over-rfc.md`](https://github.com/oisee/open-steamgate/blob/main/docs/adt-over-rfc.md).
+>
+> The bridge accepts path-and-query request targets, and confines requests and
+> redirects to the configured backend origin and base path. ADT's root-relative
+> `/sap/bc/adt/...` paths remain unchanged; a base path restricts access rather
+> than being prepended. Caller Authorization, Cookie and Host headers are ignored
+> in favour of the bridge's credentials, cookie jar and backend host. Rejected
+> targets return RFC `SYSTEM_FAILURE`, like other request errors.
 
 > ## 🎉 The fast serializer is decoded — records, types, and the compression
 >
