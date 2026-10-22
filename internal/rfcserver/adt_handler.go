@@ -175,6 +175,11 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 				return Response{}, fmt.Errorf("rfcserver: the backend did not answer: %w", err)
 			}
 		}
+		// A successful exchange can rotate the token together with the session
+		// cookies. Keeping the old token would pair it with the jar's new session.
+		if token := answer.Header.Get("X-CSRF-Token"); answer.StatusCode >= 200 && answer.StatusCode < 300 && isCSRFToken(token) {
+			csrf.set(token)
+		}
 		defer answer.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(answer.Body, adtMaxBodyBytes))
 		if err != nil {

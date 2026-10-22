@@ -288,3 +288,50 @@ func bodyOfCompact(t *testing.T, resp Response) string {
 	root, _ := bxml.PayloadRoot(tree)
 	return root.Child("MESSAGE_BODY").Body
 }
+
+func TestCSRFTokenRotationOnSuccess(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusNoContent} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var probes, posts atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-CSRF-Token") == "fetch" {
+					probes.Add(1)
+					w.Header().Set("X-CSRF-Token", "token-2")
+					return
+				}
+				if r.Method == "GET" {
+					w.Header().Set("X-CSRF-Token", "token-read")
+					return
+				}
+				n := posts.Add(1)
+				want := "token-rotated"
+				if n == 1 {
+					want = "token-2"
+				}
+				if n == 3 {
+					want = "token-read"
+				}
+				if got := r.Header.Get("X-CSRF-Token"); got != want {
+					t.Errorf("POST %d token=%q, want %q", n, got, want)
+				}
+				if n == 1 {
+					w.Header().Set("X-CSRF-Token", "token-rotated")
+				}
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			h, err := ADTRestHandler(Backend{URL: srv.URL}, srv.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				adtCall(t, h, "POST", "/sap/bc/adt/write")
+			}
+			adtCall(t, h, "GET", "/sap/bc/adt/read")
+			adtCall(t, h, "POST", "/sap/bc/adt/write")
+			if probes.Load() != 1 || posts.Load() != 3 {
+				t.Fatalf("probes=%d posts=%d; rotation must avoid another probe or retry", probes.Load(), posts.Load())
+			}
+		})
+	}
+}
