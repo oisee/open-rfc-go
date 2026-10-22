@@ -96,6 +96,12 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			}
 			log("ALLOCATE: conversation open")
 		case len(got) >= 48 && got[0] == 0x06 && got[1] == 0x03: // CPIC-init
+			if d.AuthenticateLogon != nil {
+				// Static bridge auth supports the Eclipse profile only; the
+				// legacy CPIC template must never bypass its authentication gate.
+				_, _ = d.AuthenticateLogon(nil)
+				return
+			}
 			convID = append([]byte(nil), got[40:48]...)
 			guid = findRFCGUID(got)
 			acc := patchSession(acceptFor(len(got)), convID, guid)
@@ -129,6 +135,16 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			// header's info byte says whether this record is the last. The
 			// pieces are joined before anything reads them.
 			payload := got[80:]
+			if d.AuthenticateLogon != nil && !conversationIsEclipse {
+				limit := d.MaxLogonBytes
+				if limit == 0 {
+					limit = DefaultMaxLogonBytes
+				}
+				if len(payload) > limit-len(pending) {
+					_, _ = d.AuthenticateLogon(nil)
+					return
+				}
+			}
 			if pending != nil {
 				pending = append(pending, payload...)
 				payload = pending
@@ -145,9 +161,18 @@ func ServeConscious(conn net.Conn, d *Dispatcher, logf func(string), dump func(d
 			// the conversation is already open, so the payload here is a CPIC
 			// logon rather than a call and has no CUT prefix. Told apart by
 			// that prefix rather than by length, which would be a guess.
+			identity := d.Identity
+			if d.AuthenticateLogon != nil && (!conversationIsEclipse || isEclipseLogon(payload)) {
+				var err error
+				identity, err = d.AuthenticateLogon(payload)
+				if err != nil {
+					log(err.Error())
+					return
+				}
+			}
 			if isEclipseLogon(payload) {
 				log(fmt.Sprintf("LOGON: %d bytes", len(got)-80))
-				accept, aerr := eclipseLogonAccept(got, convID, sequence, d.Identity)
+				accept, aerr := eclipseLogonAccept(got, convID, sequence, identity)
 				if aerr != nil {
 					log("LOGON: " + aerr.Error())
 					return

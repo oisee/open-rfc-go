@@ -155,3 +155,28 @@ the fix lands there.
 - A file with no upstream counterpart carries an SPDX header and no provenance
   line; it is original work.
 - Record the commit you actually read, not `main`.
+
+## OSG static authentication compatibility
+
+`internal/rfcserver/adt_auth.go` adapts `decodeRfcLogon` from
+`tools/protocols/rfc.mjs` and `authenticateLogon` from
+`tools/protocols/rfc-server.mjs` in `oisee/open-steamgate` at exact commit
+`13a3c5292eddb240d0c65b15a37a8788661410a4` (MIT there; ported by its copyright holder and
+contributed here under Apache-2.0). It reuses the bounded Go CPIC chain decoder
+and compares re-scrambled expected password bytes with the supplied field rather
+than retaining a cleartext decoded password. The configured logon byte budget
+(default 64 KiB) is an admission limit, not a protocol length claim.
+
+`pkg/adtbridge/adtbridge.go` adapts the same server's startup validation into
+`Check`/`Serve` and separate RFC options. Server hooks in `dispatcher.go` and
+`serve_conscious.go` gate calls and bound static logon reassembly; the existing
+HTTP origin, redirect, and header confinement code is unchanged.
+
+`pkg/adtbridge/adtbridge_test.go` mirrors the static wrong-password, accepted
+logon, incomplete-configuration, and cookie/CSRF forwarding assertions in
+`test/protocol-rfc.mjs` at the same commit. Go-specific malformed input,
+configured bounds, identity ownership, and a decoder fuzz target supplement
+those assertions. JS socket rejection is a close with a server-side
+`RFC authentication failed` log, not an in-band RFC exception. Demo behavior
+remains the existing Go behavior. This change does not add OSG's cross-connection
+lock adoption or backend logoff on disconnect.
