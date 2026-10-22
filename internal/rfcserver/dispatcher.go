@@ -75,6 +75,12 @@ type Dispatcher struct {
 	// configured with a system id before it connects and compares notes; see
 	// LogonIdentity. Zero means "leave the template alone".
 	Identity LogonIdentity
+	// AuthenticateLogon, when set before serving, gates every application call.
+	// Failure closes the connection without a logon-accept, as OSG does.
+	AuthenticateLogon func(payload []byte) (LogonIdentity, error)
+	// MaxLogonBytes bounds reassembly before AuthenticateLogon can decode it.
+	// Zero uses the static verifier's default budget.
+	MaxLogonBytes int
 }
 
 // NewDispatcher returns an empty dispatcher.

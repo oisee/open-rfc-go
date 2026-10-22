@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Static auth configuration follows open-steamgate tools/protocols/rfc-server.mjs
+// at 13a3c5292eddb240d0c65b15a37a8788661410a4 (MIT there), ported by its copyright holder, who contributes it here under Apache-2.0.
+// Modified for Go Options and synchronous Check/Serve validation.
+// See docs/provenance.md.
+
 // Package adtbridge is the RFC-to-HTTP bridge as a library: what
 // cmd/adt-rfc-bridge is, for a program that wants to mount it beside other
 // things — a launcher that brings up the workbench, this bridge and the DIAG
@@ -14,6 +20,7 @@ package adtbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -33,6 +40,15 @@ func LoadBackend(path string) (Backend, error) { return rfcserver.LoadBackend(pa
 // Options is everything a bridge needs besides a listener.
 type Options struct {
 	Backend Backend
+	// AuthMode is "demo" (the default) or "static". Static credentials are
+	// independent of the HTTP backend identity.
+	AuthMode    string
+	RFCUser     string
+	RFCPassword string
+	// RFCClient optionally restricts static logons to this client.
+	RFCClient string
+	// MaxLogonBytes bounds static logon decoding; zero means 64 KiB.
+	MaxLogonBytes int
 	// Timeout bounds one backend request; zero means two minutes.
 	Timeout time.Duration
 	// Verbose reports every frame decision through Log.
@@ -50,9 +66,25 @@ func (o Options) logf(format string, args ...any) {
 	}
 }
 
-// Check says whether this backend can be bridged at all, before anything
-// listens: a URL, and a REST handler that accepts it.
+// ErrAuthConfiguration reports an incomplete or unsupported auth setup.
+var ErrAuthConfiguration = errors.New("adtbridge: invalid authentication configuration")
+
+// Check validates backend and authentication setup synchronously. Call it
+// before opening listeners or starting Serve in a goroutine so startup failures
+// reach the launcher directly. Serve also checks before its first Accept.
 func Check(o Options) error {
+	if o.MaxLogonBytes < 0 {
+		return fmt.Errorf("%w: MaxLogonBytes must be nonnegative", ErrAuthConfiguration)
+	}
+	if o.AuthMode != "" && o.AuthMode != "demo" && o.AuthMode != "static" {
+		return fmt.Errorf("%w: RFC auth mode must be demo or static", ErrAuthConfiguration)
+	}
+	if o.AuthMode == "static" && (o.RFCUser == "" || o.RFCPassword == "") {
+		return fmt.Errorf("%w: static RFC auth requires STG_RFC_USER and STG_RFC_PASSWORD", ErrAuthConfiguration)
+	}
+	if o.Backend.Password != "" && o.Backend.User == "" {
+		return fmt.Errorf("%w: backend password requires STG_ADT_USER", ErrAuthConfiguration)
+	}
 	if o.Backend.URL == "" {
 		return errors.New("adtbridge: no backend URL")
 	}
@@ -87,6 +119,10 @@ func Serve(ctx context.Context, ln net.Listener, o Options) error {
 // ServeConn is one client from connect to gone.
 func ServeConn(conn net.Conn, o Options) {
 	defer conn.Close()
+	if err := Check(o); err != nil {
+		o.logf("%v", err)
+		return
+	}
 	peer := conn.RemoteAddr().String()
 	o.logf("%s connected", peer)
 	jar, err := cookiejar.New(nil)
@@ -116,6 +152,16 @@ func ServeConn(conn net.Conn, o Options) {
 	dispatcher.Handle("DDIF_FIELDINFO_GET", rfcserver.FieldInfoHandler())
 	dispatcher.Handle("RFC_GET_STRUCTURE_DEFINITION", rfcserver.StructureDefinitionHandler())
 	dispatcher.Identity = o.Backend.LogonIdentity()
+	if o.AuthMode == "static" {
+		dispatcher.MaxLogonBytes = o.MaxLogonBytes
+		dispatcher.AuthenticateLogon = func(payload []byte) (rfcserver.LogonIdentity, error) {
+			identity, err := rfcserver.AuthenticateStaticLogon(payload, o.RFCUser, o.RFCPassword, o.RFCClient, dispatcher.Identity, o.MaxLogonBytes)
+			if err != nil {
+				o.logf("%v", err)
+			}
+			return identity, err
+		}
+	}
 	logf := func(string) {}
 	if o.Verbose {
 		logf = func(s string) { o.logf("%s: %s", peer, s) }

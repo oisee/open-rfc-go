@@ -49,3 +49,4 @@ jobs:
         run: |
           go test ./internal/ni -run TestX -fuzz FuzzFrameDecoderBounds -fuzztime 60s
           go test ./internal/ni -run TestX -fuzz FuzzFrameRoundTrip -fuzztime 60s
+          go test ./pkg/adtbridge -run TestX -fuzz FuzzStaticLogon -fuzztime 15s
