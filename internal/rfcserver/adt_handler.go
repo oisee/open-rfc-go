@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Shared editing-context selection and stateful HTTP requests adapted from open-steamgate
+// tools/protocols/rfc-server.mjs at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there),
+// ported by its copyright holder under Apache-2.0. See docs/provenance.md.
 
 package rfcserver
 
@@ -53,6 +56,15 @@ var responseDescriptor = classicrfc.FunintParameter{
 // ADTRestHandler answers SADT_REST_RFC_ENDPOINT by making the request against
 // backend, which is an origin such as "http://localhost:8099".
 func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
+	return adtRestHandler(backend, client, nil, nil, LogonIdentity{})
+}
+
+// ADTSessionHandler adds OSG's editing-context ownership to the HTTP handler.
+func ADTSessionHandler(backend Backend, session *ADTSession, sessions *ADTSessions, identity LogonIdentity) (Handler, error) {
+	return adtRestHandler(backend, session.client, session, sessions, identity)
+}
+
+func adtRestHandler(backend Backend, client *http.Client, session *ADTSession, sessions *ADTSessions, identity LogonIdentity) (Handler, error) {
 	base, err := backend.origin()
 	if err != nil {
 		return nil, err
@@ -97,6 +109,9 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		return nil
 	}
 	client = &confined
+	if session != nil {
+		session.client = client
+	}
 	graph := ADTRestGraph()
 	csrf := &csrfState{}
 
@@ -126,6 +141,24 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 				return Response{}, fmt.Errorf("rfcserver: REQUEST could not be read: %w", err)
 			}
 		}
+		client, csrf := client, csrf
+		var target *url.URL
+		var owner *ADTSession
+		selected := session
+		if sessions != nil {
+			outgoing, err := httpRequestOf(ctx, base, decoded)
+			if err != nil {
+				return Response{}, err
+			}
+			target = outgoing.URL
+			selected, owner = sessions.selectSession(session, target.Query().Get("lockHandle"), identity)
+			// A shared cookie jar and CSRF token form one transaction, including
+			// probes, retries, body reads, and lock bookkeeping.
+			defer selected.pending.Done()
+			selected.mu.Lock()
+			defer selected.mu.Unlock()
+			client, csrf = selected.client, &selected.csrf
+		}
 		send := func() (*http.Response, error) {
 			outgoing, err := httpRequestOf(ctx, base, decoded)
 			if err != nil {
@@ -134,6 +167,11 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 			// who we are to the backend: the RFC logon authenticated the client
 			// to us, and the backend saw none of it
 			backend.apply(outgoing)
+			if session != nil {
+				if _, present := outgoing.Header[http.CanonicalHeaderKey("X-SAP-ADT-Sessiontype")]; !present {
+					outgoing.Header.Set("X-SAP-ADT-Sessiontype", "stateful")
+				}
+			}
 			if isModifyingMethod(outgoing.Method) {
 				// Whatever token the caller put on the request was minted for a
 				// session the backend never saw, so it is replaced rather than
@@ -184,6 +222,9 @@ func ADTRestHandler(backend Backend, client *http.Client) (Handler, error) {
 		body, err := io.ReadAll(io.LimitReader(answer.Body, adtMaxBodyBytes))
 		if err != nil {
 			return Response{}, fmt.Errorf("rfcserver: the backend's answer could not be read: %w", err)
+		}
+		if sessions != nil && answer.StatusCode >= 200 && answer.StatusCode < 300 {
+			sessions.record(selected, owner, identity, target, decoded, body)
 		}
 		if req.Compact != nil {
 			doc, err := bxml.Encode(responseElement(answer, body))

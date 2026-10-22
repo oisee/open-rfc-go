@@ -178,5 +178,39 @@ logon, incomplete-configuration, and cookie/CSRF forwarding assertions in
 configured bounds, identity ownership, and a decoder fuzz target supplement
 those assertions. JS socket rejection is a close with a server-side
 `RFC authentication failed` log, not an in-band RFC exception. Demo behavior
-remains the existing Go behavior. This change does not add OSG's cross-connection
-lock adoption or backend logoff on disconnect.
+remains the existing Go behavior. The subsequent operational-limits port below adds OSG's cross-connection
+lock adoption and backend logoff on disconnect.
+
+
+## OSG RFC bridge operational limits
+
+Read-only reference: `oisee/open-steamgate` main at exact commit
+`7d8e0617a8e5ded4ead65da534acf1f1b2021863`. The source is MIT there;
+these adaptations are ported by its copyright holder (oisee) and contributed
+here under Apache-2.0. `tools/protocols/server.mjs` calls
+`createRfcAdtServer` without overriding `timeoutMs` or `maxConnections`; it
+adds no separate RFC idle timeout or identity forwarding rule.
+
+| OSG source | Go file | Translation |
+|---|---|---|
+| `tools/protocols/rfc-server.mjs`: `createRfcAdtServer`, `socket.setTimeout`, `server.maxConnections`, logon `conversationAuth` | `pkg/adtbridge/adtbridge.go` | Default 120 s HTTP request and socket inactivity timeout; default 64 live sockets per listener; configurable via Options. Excess sockets close immediately. A bounded read pump observes EOF/activity during HTTP work. Demo mode without backend credentials uses caller username and empty password; static/configured backend identity stays authoritative. Listener-local session registry; standalone ServeConn is isolated. |
+| Same default options | `cmd/adt-rfc-bridge/main.go` | Existing timeout flag now also describes socket inactivity; new maximum-connections flag. Demo banner describes caller-name forwarding. |
+| `tools/protocols/rfc.mjs`: `decodeRfcLogon`; `rfc-server.mjs`: demo `authenticateLogon` | `internal/rfcserver/adt_auth.go` | Reuses the existing bounded parser for demo identity; unlike static auth, demo does not require or verify password fields. Returned strings own their storage. Existing 64 KiB configured Go admission budget remains. |
+| `tools/protocols/rfc-server.mjs`: `editingHandles`, `forgetSession`, session request chain, `endBackendSession` | `internal/rfcserver/adt_sessions.go` | Mutex/wait-group serialization replaces Promise chains. A known handle adopts the owner's cookies/CSRF only for the same client/user identity; successful LOCK records exactly 40 hex characters, successful UNLOCK/explicit logoff forgets handles, disconnect marks closed and forgets immediately. Pending own/borrowed requests finish before cookie-bearing logoff; GET uses min(request timeout, 5 s), manual redirects, no retry. Tracks observed cookie pairs for logoff, including ADT-path cookies. |
+| `tools/protocols/rfc-server.mjs`: request context selection, `forwardAdt` | `internal/rfcserver/adt_handler.go` | Session-aware handler selects and serializes the shared context before HTTP work; successful responses update handle bookkeeping. Default stateful header with caller's explicit value preserved. Existing generic handler remains available. |
+| `tools/protocols/rfc-server.mjs`: `fetchCsrfToken` | `internal/rfcserver/adt_csrf.go` | Adds JS's stateful header to the existing HEAD/GET token probe. |
+| `test/protocol-rfc.mjs`, `test/adt-rfc-context.mjs` | `pkg/adtbridge/adtbridge_test.go`, `pkg/adtbridge/limits_test.go`, `internal/rfcserver/adt_sessions_test.go` | Forwarding fixture accepts disconnect logoff. Synthetic HTTP backend tests port caller attribution/spoof rejection, same-identity pooled SAVE, foreign client/user isolation, unknown/stale handles, UNLOCK/explicit logoff removal, owner disconnect, pending LOCK and borrowed SAVE cleanup. Go-specific tests cover default/configured limits, slot reuse, idle timer resets, backend cancellation, logoff deadlines/no retry/no-cookie behavior, cookie/CSRF serialization and rotation, handle/identity byte ownership, malformed demo logons, and `FuzzDemoLogon`. |
+
+The OSG editing-context tests' ABAP runtime, repository creation/TMP tree,
+nodepath, activation, source persistence, ETag and object-lock rejection
+assertions have no bridge-only Go analogue: those are HTTP backend behaviors.
+The Go tests use a synthetic backend to verify the bridge's session/identity
+routing and cleanup without embedding OSG's ABAP runtime.
+
+Existing Go origin/subtree confinement remains stricter than JS's origin-only
+check, including for bridge-owned logoff. A configured subtree excluding
+`/sap/public/bc/icf/logoff` prevents that request; backend idle expiry is the
+fallback. Normal Go cookie-jar path/domain/expiry semantics and the existing
+HTTP timeout covering response bodies remain; the new logoff sends the same
+observed cookie pairs as JS. This port does not change unrelated body/frame
+limits, metadata handlers, or wire response encodings.

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Operational limit defaults and demo identity descriptions adapted from open-steamgate
+// tools/protocols/rfc-server.mjs at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there),
+// ported by its copyright holder under Apache-2.0. See docs/provenance.md.
 //
 // adt-rfc-bridge answers ADT over RFC and forwards it to anything that speaks
 // HTTP.
@@ -28,8 +31,9 @@
 // The RFC side does not check the logon. It cannot usefully: the credentials
 // that matter are the ones the bridge itself presents to the backend, and they
 // are configured here rather than carried by the caller. So Eclipse may log on
-// with any user and any password, and every one of them reaches the backend as
-// whoever the configuration says.
+// with any user and any password. A configured backend user takes precedence;
+// otherwise the RFC username is sent as Basic auth with an empty password,
+// matching OSG demo mode.
 //
 // That is a deliberate choice and not an oversight, and it makes this an open
 // door: a port on a machine that speaks to a system, with no gate in front of
@@ -49,7 +53,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
 	"github.com/oisee/open-rfc-go/pkg/adtbridge"
@@ -59,7 +62,8 @@ func main() {
 	listen := flag.String("listen", ":3300", "gateway address Eclipse connects to")
 	backend := flag.String("backend", "", "origin the ADT requests are made against, e.g. http://localhost:8099")
 	config := flag.String("config", "", "JSON file with the backend and its credentials; see -help")
-	timeout := flag.Duration("timeout", 120*time.Second, "how long one backend request may take")
+	timeout := flag.Duration("timeout", adtbridge.DefaultTimeout, "backend request and socket inactivity timeout")
+	maxConnections := flag.Int("max-connections", adtbridge.DefaultMaxConnections, "maximum concurrent RFC sockets")
 	verbose := flag.Bool("verbose", false, "log every frame decision")
 	flag.Parse()
 
@@ -96,18 +100,23 @@ func main() {
 	}
 	defer listener.Close()
 	options := adtbridge.Options{
-		Backend: target,
-		Timeout: *timeout,
-		Verbose: *verbose,
-		Log:     func(format string, args ...any) { log.Printf("adt-rfc-bridge: "+format, args...) },
-		Dump:    dumper(),
+		Backend:        target,
+		Timeout:        *timeout,
+		MaxConnections: *maxConnections,
+		Verbose:        *verbose,
+		Log:            func(format string, args ...any) { log.Printf("adt-rfc-bridge: "+format, args...) },
+		Dump:           dumper(),
 	}
 	if err := adtbridge.Check(options); err != nil {
 		log.Fatalf("adt-rfc-bridge: %v", err)
 	}
 	log.Printf("adt-rfc-bridge: %s -> %s", *listen, target.Describe())
 	log.Printf("adt-rfc-bridge: point an ABAP project at this host, and at the instance this port belongs to")
-	log.Printf("adt-rfc-bridge: the RFC logon is NOT checked — every caller reaches the backend as %s", adtbridge.User(target))
+	if target.User == "" {
+		log.Printf("adt-rfc-bridge: the RFC logon is NOT checked — backend Basic auth uses the RFC caller name with an empty password")
+	} else {
+		log.Printf("adt-rfc-bridge: the RFC logon is NOT checked — every caller reaches the backend as %s", adtbridge.User(target))
+	}
 	if err := adtbridge.Serve(context.Background(), listener, options); err != nil {
 		log.Printf("adt-rfc-bridge: %v", err)
 	}
