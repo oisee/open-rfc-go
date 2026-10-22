@@ -91,7 +91,13 @@ func fetchCSRFToken(ctx context.Context, client *http.Client, base *url.URL, bac
 	if err != nil {
 		return "", err
 	}
-	target := base.ResolveReference(ref).String()
+	probeURL := base.ResolveReference(ref)
+	// Any ADT resource can mint a token. A configured subtree must also bound
+	// our own probe; using its root keeps the probe inside that subtree.
+	if err := admitBackendURL(base, probeURL); err != nil {
+		probeURL = base.ResolveReference(&url.URL{Path: base.Path})
+	}
+	target := probeURL.String()
 	var lastStatus int
 	for _, method := range []string{http.MethodHead, http.MethodGet} {
 		probe, err := http.NewRequestWithContext(ctx, method, target, nil)

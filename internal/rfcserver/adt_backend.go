@@ -148,7 +148,7 @@ func (b Backend) Describe() string {
 
 func (b Backend) origin() (*url.URL, error) {
 	base, err := url.Parse(b.URL)
-	if err != nil || base.Scheme == "" || base.Host == "" {
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
 		return nil, fmt.Errorf("rfcserver: backend %q is not an origin such as http://host:port", b.URL)
 	}
 	return base, nil
