@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Shutdown adapted from open-steamgate tools/protocols/server.mjs
+// at 2fb365933d89b903d3f8f42286778894cbd47d73 (MIT there), ported by its
+// copyright holder under Apache-2.0; Go also joins handlers and read pumps.
 // Operational limits, session lifecycle, and demo identity adapted from open-steamgate
 // tools/protocols/rfc-server.mjs at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there),
 // ported by its copyright holder under Apache-2.0. See docs/provenance.md.
@@ -61,6 +64,9 @@ type Options struct {
 	// MaxConnections caps live sockets in Serve; zero means 64. Excess sockets
 	// are closed immediately. ServeConn serves one independent session.
 	MaxConnections int
+	// ShutdownGrace bounds draining after cancellation or listener failure.
+	// Zero means 5 seconds. Backend work retains Timeout; logoff is capped at 5 s.
+	ShutdownGrace time.Duration
 	// Verbose reports every frame decision through Log.
 	Verbose bool
 	// Log receives the bridge's lines; nil is quiet.
@@ -79,6 +85,9 @@ func (o Options) logf(format string, args ...any) {
 // DefaultTimeout matches OSG timeoutMs for HTTP requests and RFC inactivity.
 const DefaultTimeout = 120 * time.Second
 
+// DefaultShutdownGrace matches OSG closeProtocols graceMs.
+const DefaultShutdownGrace = 5 * time.Second
+
 // DefaultMaxConnections matches OSG server.maxConnections.
 const DefaultMaxConnections = 64
 
@@ -92,6 +101,13 @@ func (o Options) timeout() time.Duration {
 	return o.Timeout
 }
 
+func (o Options) shutdownGrace() time.Duration {
+	if o.ShutdownGrace == 0 {
+		return DefaultShutdownGrace
+	}
+	return o.ShutdownGrace
+}
+
 // ErrAuthConfiguration reports an incomplete or unsupported auth setup.
 var ErrAuthConfiguration = errors.New("adtbridge: invalid authentication configuration")
 
@@ -99,8 +115,8 @@ var ErrAuthConfiguration = errors.New("adtbridge: invalid authentication configu
 // before opening listeners or starting Serve in a goroutine so startup failures
 // reach the launcher directly. Serve also checks before its first Accept.
 func Check(o Options) error {
-	if o.Timeout < 0 || o.MaxConnections < 0 {
-		return fmt.Errorf("%w: Timeout and MaxConnections must be nonnegative", ErrLimitsConfiguration)
+	if o.Timeout < 0 || o.MaxConnections < 0 || o.ShutdownGrace < 0 {
+		return fmt.Errorf("%w: Timeout, MaxConnections and ShutdownGrace must be nonnegative", ErrLimitsConfiguration)
 	}
 	if o.MaxLogonBytes < 0 {
 		return fmt.Errorf("%w: MaxLogonBytes must be nonnegative", ErrAuthConfiguration)
@@ -124,14 +140,17 @@ func Check(o Options) error {
 // Serve accepts connections on ln until the context ends or the listener
 // fails, and serves each on its own goroutine. Closing the listener is how
 // the context stops it, so a caller that owns ln should not also close it
-// while Serve runs.
+// while Serve runs. Shutdown drains for ShutdownGrace, closes surviving sockets,
+// and waits for handlers, read pumps, and bounded backend cleanup.
 func Serve(ctx context.Context, ln net.Listener, o Options) error {
 	if err := Check(o); err != nil {
 		return err
 	}
 	stop := make(chan struct{})
-	defer close(stop)
+	watchDone := make(chan struct{})
+	defer func() { close(stop); <-watchDone }()
 	go func() {
+		defer close(watchDone)
 		select {
 		case <-ctx.Done():
 			ln.Close()
@@ -144,6 +163,31 @@ func Serve(ctx context.Context, ln net.Listener, o Options) error {
 	}
 	slots := make(chan struct{}, limit)
 	sessions := rfcserver.NewADTSessions()
+	var workers sync.WaitGroup
+	var mu sync.Mutex
+	active := make(map[net.Conn]struct{})
+	defer func() {
+		ln.Close()
+		done := make(chan struct{})
+		go func() { workers.Wait(); close(done) }()
+		timer := time.NewTimer(o.shutdownGrace())
+		defer timer.Stop()
+		select {
+		case <-done:
+			return
+		case <-timer.C:
+		}
+		mu.Lock()
+		survivors := make([]net.Conn, 0, len(active))
+		for conn := range active {
+			survivors = append(survivors, conn)
+		}
+		mu.Unlock()
+		for _, conn := range survivors {
+			conn.Close()
+		}
+		<-done
+	}()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -152,10 +196,22 @@ func Serve(ctx context.Context, ln net.Listener, o Options) error {
 			}
 			return err
 		}
+		if ctx.Err() != nil {
+			conn.Close()
+			return nil
+		}
 		select {
 		case slots <- struct{}{}:
 			counted := &closeConn{Conn: conn, onClose: func() { <-slots }}
-			go serveConn(counted, o, sessions)
+			mu.Lock()
+			active[counted] = struct{}{}
+			mu.Unlock()
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer func() { mu.Lock(); delete(active, counted); mu.Unlock() }()
+				serveConn(counted, o, sessions)
+			}()
 		default:
 			conn.Close()
 		}
@@ -192,7 +248,7 @@ func serveConn(conn net.Conn, o Options, sessions *rfcserver.ADTSessions) {
 	backend := o.Backend
 	defer func() { sessions.Disconnect(session); session.End(backend, timeout, o.logf) }()
 	idle := newIdleConn(conn, timeout, func() { sessions.Disconnect(session) })
-	defer idle.Close()
+	defer func() { idle.Close(); <-idle.done }()
 	conn = idle
 	dispatcher := rfcserver.NewDispatcher()
 	dispatcher.Handle("RFC_GET_FUNCTION_INTERFACE", rfcserver.FunctionInterfaceHandler())
@@ -265,17 +321,19 @@ func (c *closeConn) Close() error {
 // Read deadlines alone would only start counting once the handler returned.
 type idleConn struct {
 	net.Conn
-	mu       sync.Mutex
-	timer    *time.Timer
-	incoming *io.PipeReader
-	writer   *io.PipeWriter
-	timeout  time.Duration
-	closed   bool
-	onClose  func()
+	mu        sync.Mutex
+	timer     *time.Timer
+	incoming  *io.PipeReader
+	writer    *io.PipeWriter
+	timeout   time.Duration
+	done      chan struct{}
+	closeDone chan struct{}
+	closed    bool
+	onClose   func()
 }
 
 func newIdleConn(conn net.Conn, timeout time.Duration, onClose func()) *idleConn {
-	c := &idleConn{Conn: conn, timeout: timeout, onClose: onClose}
+	c := &idleConn{Conn: conn, timeout: timeout, onClose: onClose, done: make(chan struct{}), closeDone: make(chan struct{})}
 	c.incoming, c.writer = io.Pipe()
 	c.mu.Lock()
 	c.timer = time.AfterFunc(timeout, func() { c.Close() })
@@ -284,6 +342,7 @@ func newIdleConn(conn net.Conn, timeout time.Duration, onClose func()) *idleConn
 	// an HTTP handler is busy. The pipe applies backpressure with at most one
 	// 32 KiB chunk retained here, rather than queuing unbounded network bytes.
 	go func() {
+		defer close(c.done)
 		defer c.Close()
 		chunk := make([]byte, 32*1024)
 		for {
@@ -326,6 +385,7 @@ func (c *idleConn) Close() error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
+		<-c.closeDone
 		return nil
 	}
 	c.closed = true
@@ -335,5 +395,6 @@ func (c *idleConn) Close() error {
 	err := c.Conn.Close()
 	c.incoming.Close()
 	c.writer.Close()
+	close(c.closeDone)
 	return err
 }

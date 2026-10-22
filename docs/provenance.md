@@ -214,3 +214,21 @@ fallback. Normal Go cookie-jar path/domain/expiry semantics and the existing
 HTTP timeout covering response bodies remain; the new logoff sends the same
 observed cookie pairs as JS. This port does not change unrelated body/frame
 limits, metadata handlers, or wire response encodings.
+
+## OSG RFC bridge shutdown
+
+`pkg/adtbridge/adtbridge.go` adapts socket tracking and `closeProtocols` from
+`tools/protocols/server.mjs` at exact OSG commit
+`2fb365933d89b903d3f8f42286778894cbd47d73` (MIT there; ported by its
+copyright holder under Apache-2.0). `Options.ShutdownGrace` defaults to the
+JS five-second grace period. Cancellation and listener errors stop accepting,
+wait for draining, close surviving sockets, and join connection handlers and
+read pumps. In-flight backend work retains its configured request timeout;
+subsequent cookie-bearing logoff retains its independent min(timeout, 5 s)
+deadline. Serve therefore also waits for that bounded cleanup after grace.
+
+`pkg/adtbridge/shutdown_test.go` ports the held-socket shutdown assertion in
+`test/protocol-rfc.mjs` at that commit to RFC, adding cancellation/listener-error
+coverage, blocked-logoff barriers, a bridge worker counter, in-flight completion
+and early drain. The JS combined DIAG/RFC startup assertions are outside this
+RFC-only library; no decoder or caller byte ownership changes are involved.

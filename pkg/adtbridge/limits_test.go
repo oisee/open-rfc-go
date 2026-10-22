@@ -102,10 +102,10 @@ func callBody(t *testing.T, c net.Conn, method, path, want string) {
 }
 
 func TestLimitsDefaultsAndValidation(t *testing.T) {
-	if (Options{}).timeout() != 120*time.Second || DefaultMaxConnections != 64 {
+	if (Options{}).timeout() != 120*time.Second || DefaultMaxConnections != 64 || (Options{}).shutdownGrace() != 5*time.Second {
 		t.Fatal("JS defaults changed")
 	}
-	for _, o := range []Options{{Timeout: -time.Second}, {MaxConnections: -1}} {
+	for _, o := range []Options{{Timeout: -time.Second}, {MaxConnections: -1}, {ShutdownGrace: -time.Second}} {
 		o.Backend.URL = "http://127.0.0.1"
 		if err := Serve(context.Background(), noAccept{}, o); !errors.Is(err, ErrLimitsConfiguration) {
 			t.Fatal(err)
