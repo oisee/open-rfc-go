@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Disconnect logoff assertion follows open-steamgate test/protocol-rfc.mjs
+// at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there), ported by its
+// copyright holder under Apache-2.0. See docs/provenance.md.
 // Assertions adapted from open-steamgate test/protocol-rfc.mjs at
 // 13a3c5292eddb240d0c65b15a37a8788661410a4 (MIT there), ported by its copyright holder, who contributes it here under Apache-2.0.
 // Modified for Go: net.Pipe, Go encoders, malformed/bounds/ownership tests.
@@ -190,6 +193,12 @@ func TestStaticAcceptAndForwardCookiesCSRF(t *testing.T) {
 		}
 		if r.URL.Query().Get("sap-client") != "777" || r.URL.Query().Get("sap-language") != "DE" {
 			t.Error("backend client/language missing")
+		}
+		if r.URL.Path == "/sap/public/bc/icf/logoff" {
+			if r.Header.Get("Cookie") != "bridge-cookie=present" {
+				t.Error("logoff cookie missing")
+			}
+			return
 		}
 		if r.Header.Get("X-CSRF-Token") == "fetch" {
 			n := probes.Add(1)

@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+// Shutdown adapted from open-steamgate tools/protocols/server.mjs
+// at 2fb365933d89b903d3f8f42286778894cbd47d73 (MIT there), ported by its
+// copyright holder under Apache-2.0; Go also joins handlers and read pumps.
+// Operational limits, session lifecycle, and demo identity adapted from open-steamgate
+// tools/protocols/rfc-server.mjs at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there),
+// ported by its copyright holder under Apache-2.0. See docs/provenance.md.
 // Static auth configuration follows open-steamgate tools/protocols/rfc-server.mjs
 // at 13a3c5292eddb240d0c65b15a37a8788661410a4 (MIT there), ported by its copyright holder, who contributes it here under Apache-2.0.
 // Modified for Go Options and synchronous Check/Serve validation.
@@ -11,19 +17,22 @@
 // stays internal: a caller gets a Backend, an Options and Serve, and nothing
 // of the record layer leaks.
 //
-// One connection is one Eclipse session: its own cookie jar against the
+// One connection owns one Eclipse session: its own cookie jar against the
 // backend, its own dispatcher with the four function modules an ADT client
 // asks for (the REST endpoint and the three that describe it), and the
-// conscious loop that answers frames until the client goes.
+// conscious loop that answers frames until the client goes. Known lock handles
+// may borrow that session from another connection of the same RFC identity.
 package adtbridge
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"sync"
 	"time"
 
 	"github.com/oisee/open-rfc-go/internal/rfcserver"
@@ -47,10 +56,17 @@ type Options struct {
 	RFCPassword string
 	// RFCClient optionally restricts static logons to this client.
 	RFCClient string
-	// MaxLogonBytes bounds static logon decoding; zero means 64 KiB.
+	// MaxLogonBytes bounds logon decoding; zero means 64 KiB.
 	MaxLogonBytes int
-	// Timeout bounds one backend request; zero means two minutes.
+	// Timeout bounds one backend request and socket inactivity, matching JS
+	// timeoutMs. Zero means 120 seconds.
 	Timeout time.Duration
+	// MaxConnections caps live sockets in Serve; zero means 64. Excess sockets
+	// are closed immediately. ServeConn serves one independent session.
+	MaxConnections int
+	// ShutdownGrace bounds draining after cancellation or listener failure.
+	// Zero means 5 seconds. Backend work retains Timeout; logoff is capped at 5 s.
+	ShutdownGrace time.Duration
 	// Verbose reports every frame decision through Log.
 	Verbose bool
 	// Log receives the bridge's lines; nil is quiet.
@@ -66,6 +82,32 @@ func (o Options) logf(format string, args ...any) {
 	}
 }
 
+// DefaultTimeout matches OSG timeoutMs for HTTP requests and RFC inactivity.
+const DefaultTimeout = 120 * time.Second
+
+// DefaultShutdownGrace matches OSG closeProtocols graceMs.
+const DefaultShutdownGrace = 5 * time.Second
+
+// DefaultMaxConnections matches OSG server.maxConnections.
+const DefaultMaxConnections = 64
+
+// ErrLimitsConfiguration reports a negative limit (zero selects JS defaults).
+var ErrLimitsConfiguration = errors.New("adtbridge: invalid limits configuration")
+
+func (o Options) timeout() time.Duration {
+	if o.Timeout == 0 {
+		return DefaultTimeout
+	}
+	return o.Timeout
+}
+
+func (o Options) shutdownGrace() time.Duration {
+	if o.ShutdownGrace == 0 {
+		return DefaultShutdownGrace
+	}
+	return o.ShutdownGrace
+}
+
 // ErrAuthConfiguration reports an incomplete or unsupported auth setup.
 var ErrAuthConfiguration = errors.New("adtbridge: invalid authentication configuration")
 
@@ -73,6 +115,9 @@ var ErrAuthConfiguration = errors.New("adtbridge: invalid authentication configu
 // before opening listeners or starting Serve in a goroutine so startup failures
 // reach the launcher directly. Serve also checks before its first Accept.
 func Check(o Options) error {
+	if o.Timeout < 0 || o.MaxConnections < 0 || o.ShutdownGrace < 0 {
+		return fmt.Errorf("%w: Timeout, MaxConnections and ShutdownGrace must be nonnegative", ErrLimitsConfiguration)
+	}
 	if o.MaxLogonBytes < 0 {
 		return fmt.Errorf("%w: MaxLogonBytes must be nonnegative", ErrAuthConfiguration)
 	}
@@ -95,14 +140,53 @@ func Check(o Options) error {
 // Serve accepts connections on ln until the context ends or the listener
 // fails, and serves each on its own goroutine. Closing the listener is how
 // the context stops it, so a caller that owns ln should not also close it
-// while Serve runs.
+// while Serve runs. Shutdown drains for ShutdownGrace, closes surviving sockets,
+// and waits for handlers, read pumps, and bounded backend cleanup.
 func Serve(ctx context.Context, ln net.Listener, o Options) error {
 	if err := Check(o); err != nil {
 		return err
 	}
+	stop := make(chan struct{})
+	watchDone := make(chan struct{})
+	defer func() { close(stop); <-watchDone }()
 	go func() {
-		<-ctx.Done()
+		defer close(watchDone)
+		select {
+		case <-ctx.Done():
+			ln.Close()
+		case <-stop:
+		}
+	}()
+	limit := o.MaxConnections
+	if limit == 0 {
+		limit = DefaultMaxConnections
+	}
+	slots := make(chan struct{}, limit)
+	sessions := rfcserver.NewADTSessions()
+	var workers sync.WaitGroup
+	var mu sync.Mutex
+	active := make(map[net.Conn]struct{})
+	defer func() {
 		ln.Close()
+		done := make(chan struct{})
+		go func() { workers.Wait(); close(done) }()
+		timer := time.NewTimer(o.shutdownGrace())
+		defer timer.Stop()
+		select {
+		case <-done:
+			return
+		case <-timer.C:
+		}
+		mu.Lock()
+		survivors := make([]net.Conn, 0, len(active))
+		for conn := range active {
+			survivors = append(survivors, conn)
+		}
+		mu.Unlock()
+		for _, conn := range survivors {
+			conn.Close()
+		}
+		<-done
 	}()
 	for {
 		conn, err := ln.Accept()
@@ -112,12 +196,34 @@ func Serve(ctx context.Context, ln net.Listener, o Options) error {
 			}
 			return err
 		}
-		go ServeConn(conn, o)
+		if ctx.Err() != nil {
+			conn.Close()
+			return nil
+		}
+		select {
+		case slots <- struct{}{}:
+			counted := &closeConn{Conn: conn, onClose: func() { <-slots }}
+			mu.Lock()
+			active[counted] = struct{}{}
+			mu.Unlock()
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer func() { mu.Lock(); delete(active, counted); mu.Unlock() }()
+				serveConn(counted, o, sessions)
+			}()
+		default:
+			conn.Close()
+		}
 	}
 }
 
 // ServeConn is one client from connect to gone.
 func ServeConn(conn net.Conn, o Options) {
+	serveConn(conn, o, rfcserver.NewADTSessions())
+}
+
+func serveConn(conn net.Conn, o Options, sessions *rfcserver.ADTSessions) {
 	defer conn.Close()
 	if err := Check(o); err != nil {
 		o.logf("%v", err)
@@ -130,37 +236,52 @@ func ServeConn(conn net.Conn, o Options) {
 		o.logf("%s: %v", peer, err)
 		return
 	}
-	timeout := o.Timeout
-	if timeout == 0 {
-		timeout = 2 * time.Minute
-	}
-	client := &http.Client{Timeout: timeout, Jar: jar}
+	timeout := o.timeout()
+	client := &http.Client{Timeout: timeout, Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if tr, terr := o.Backend.Transport(); terr != nil {
 		o.logf("%s: %v", peer, terr)
 		return
 	} else if tr != nil {
 		client.Transport = tr
 	}
-	handler, err := rfcserver.ADTRestHandler(o.Backend, client)
-	if err != nil {
-		o.logf("%s: %v", peer, err)
-		return
-	}
+	session := rfcserver.NewADTSession(client)
+	backend := o.Backend
+	defer func() { sessions.Disconnect(session); session.End(backend, timeout, o.logf) }()
+	idle := newIdleConn(conn, timeout, func() { sessions.Disconnect(session) })
+	defer func() { idle.Close(); <-idle.done }()
+	conn = idle
 	dispatcher := rfcserver.NewDispatcher()
-	dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
 	dispatcher.Handle("RFC_GET_FUNCTION_INTERFACE", rfcserver.FunctionInterfaceHandler())
 	dispatcher.Handle("DDIF_FIELDINFO_GET", rfcserver.FieldInfoHandler())
 	dispatcher.Handle("RFC_GET_STRUCTURE_DEFINITION", rfcserver.StructureDefinitionHandler())
 	dispatcher.Identity = o.Backend.LogonIdentity()
-	if o.AuthMode == "static" {
-		dispatcher.MaxLogonBytes = o.MaxLogonBytes
-		dispatcher.AuthenticateLogon = func(payload []byte) (rfcserver.LogonIdentity, error) {
-			identity, err := rfcserver.AuthenticateStaticLogon(payload, o.RFCUser, o.RFCPassword, o.RFCClient, dispatcher.Identity, o.MaxLogonBytes)
-			if err != nil {
-				o.logf("%v", err)
-			}
+	dispatcher.MaxLogonBytes = o.MaxLogonBytes
+	loggedOn := false
+	dispatcher.AuthenticateLogon = func(payload []byte) (rfcserver.LogonIdentity, error) {
+		if loggedOn {
+			return rfcserver.LogonIdentity{}, rfcserver.ErrAuthentication
+		}
+		var identity rfcserver.LogonIdentity
+		var err error
+		if o.AuthMode == "static" {
+			identity, err = rfcserver.AuthenticateStaticLogon(payload, o.RFCUser, o.RFCPassword, o.RFCClient, dispatcher.Identity, o.MaxLogonBytes)
+		} else {
+			identity, err = rfcserver.DecodeDemoLogon(payload, dispatcher.Identity, o.MaxLogonBytes)
+		}
+		if err != nil {
+			o.logf("%v", err)
 			return identity, err
 		}
+		if o.AuthMode != "static" && backend.User == "" {
+			backend.User = identity.User
+		}
+		handler, err := rfcserver.ADTSessionHandler(backend, session, sessions, identity)
+		if err != nil {
+			return identity, err
+		}
+		dispatcher.Handle("SADT_REST_RFC_ENDPOINT", handler)
+		loggedOn = true
+		return identity, nil
 	}
 	logf := func(string) {}
 	if o.Verbose {
@@ -180,4 +301,100 @@ func User(b Backend) string {
 		return "an anonymous client"
 	}
 	return b.User
+}
+
+// closeConn releases a listener slot when the socket closes, independently of
+// the best-effort HTTP cleanup which can outlive it.
+type closeConn struct {
+	net.Conn
+	once    sync.Once
+	onClose func()
+}
+
+func (c *closeConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.onClose)
+	return err
+}
+
+// Node's socket timer measures inactivity even while HTTP work is in flight.
+// Read deadlines alone would only start counting once the handler returned.
+type idleConn struct {
+	net.Conn
+	mu        sync.Mutex
+	timer     *time.Timer
+	incoming  *io.PipeReader
+	writer    *io.PipeWriter
+	timeout   time.Duration
+	done      chan struct{}
+	closeDone chan struct{}
+	closed    bool
+	onClose   func()
+}
+
+func newIdleConn(conn net.Conn, timeout time.Duration, onClose func()) *idleConn {
+	c := &idleConn{Conn: conn, timeout: timeout, onClose: onClose, done: make(chan struct{}), closeDone: make(chan struct{})}
+	c.incoming, c.writer = io.Pipe()
+	c.mu.Lock()
+	c.timer = time.AfterFunc(timeout, func() { c.Close() })
+	c.mu.Unlock()
+	// Reading independently observes disconnects and resets the idle timer while
+	// an HTTP handler is busy. The pipe applies backpressure with at most one
+	// 32 KiB chunk retained here, rather than queuing unbounded network bytes.
+	go func() {
+		defer close(c.done)
+		defer c.Close()
+		chunk := make([]byte, 32*1024)
+		for {
+			n, err := c.Conn.Read(chunk)
+			if n > 0 {
+				c.touch()
+				if _, werr := c.writer.Write(chunk[:n]); werr != nil {
+					return
+				}
+			}
+			if err != nil {
+				c.writer.CloseWithError(err)
+				return
+			}
+		}
+	}()
+	return c
+}
+func (c *idleConn) touch() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.timer.Reset(c.timeout)
+	}
+}
+func (c *idleConn) Read(b []byte) (int, error) {
+	return c.incoming.Read(b)
+}
+func (c *idleConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		c.touch()
+	}
+	if err != nil {
+		c.Close()
+	}
+	return n, err
+}
+func (c *idleConn) Close() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		<-c.closeDone
+		return nil
+	}
+	c.closed = true
+	c.timer.Stop()
+	c.mu.Unlock()
+	c.onClose()
+	err := c.Conn.Close()
+	c.incoming.Close()
+	c.writer.Close()
+	close(c.closeDone)
+	return err
 }

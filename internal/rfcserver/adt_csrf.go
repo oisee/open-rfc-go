@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Stateful CSRF probe headers adapted from open-steamgate
+// tools/protocols/rfc-server.mjs at 7d8e0617a8e5ded4ead65da534acf1f1b2021863 (MIT there),
+// ported by its copyright holder under Apache-2.0. See docs/provenance.md.
 
 package rfcserver
 
@@ -106,6 +109,7 @@ func fetchCSRFToken(ctx context.Context, client *http.Client, base *url.URL, bac
 		}
 		probe.Header.Set("X-CSRF-Token", "fetch")
 		probe.Header.Set("Accept", "*/*")
+		probe.Header.Set("X-SAP-ADT-Sessiontype", "stateful")
 		backend.apply(probe)
 		answer, err := client.Do(probe)
 		if err != nil {
