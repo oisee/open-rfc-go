@@ -68,9 +68,9 @@ type Client struct {
 	mu          sync.Mutex
 	fnCache     map[string]metadata.RfcFunctionInterface
 	structCache map[string]rfctypes.RfcStructureDefinition
-	// graphCache holds normalized RFC_METADATA_GET type graphs (and the
-	// failure to obtain one) per function module — see recursive.go.
-	graphCache map[string]graphEntry
+	// graphCache holds normalized RFC_METADATA_GET type graphs per function
+	// module — successful lookups only, see recursive.go.
+	graphCache map[string]metadata.Graph
 }
 
 // Open dials the destination, establishes a pool of authenticated sessions, and
@@ -99,7 +99,7 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 		}
 		sess, err := client.Open(ctx, sopts)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrTransport, err)
+			return nil, fmt.Errorf("%w: %w", ErrTransport, err)
 		}
 		if err := sess.LogonAndPing(ctx, client.LogonOptions{
 			Client:   d.Client,
@@ -130,7 +130,7 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 		dest:        d,
 		fnCache:     map[string]metadata.RfcFunctionInterface{},
 		structCache: map[string]rfctypes.RfcStructureDefinition{},
-		graphCache:  map[string]graphEntry{},
+		graphCache:  map[string]metadata.Graph{},
 	}
 	// Fail fast: prove the destination works before returning.
 	lease, err := p.Acquire(ctx)
@@ -206,7 +206,7 @@ func (c *Client) functionInterfaceOn(ctx context.Context, sess *lifecycle.Manage
 	}
 	res, err := sess.CallRaw(ctx, req)
 	if err != nil {
-		return metadata.RfcFunctionInterface{}, fmt.Errorf("%w: %v", ErrTransport, err)
+		return metadata.RfcFunctionInterface{}, fmt.Errorf("%w: %w", ErrTransport, err)
 	}
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return metadata.RfcFunctionInterface{}, exc
@@ -231,7 +231,7 @@ func (c *Client) structureDefinitionOn(ctx context.Context, sess *lifecycle.Mana
 	}
 	res, err := sess.CallRaw(ctx, req)
 	if err != nil {
-		return rfctypes.RfcStructureDefinition{}, fmt.Errorf("%w: %v", ErrTransport, err)
+		return rfctypes.RfcStructureDefinition{}, fmt.Errorf("%w: %w", ErrTransport, err)
 	}
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return rfctypes.RfcStructureDefinition{}, exc

@@ -34,8 +34,8 @@ func TestTranslateTaxonomy(t *testing.T) {
 				t.Fatalf("translate(%v) = %v; want errors.Is(_, %v)", c.in, got, c.want)
 			}
 			// the original error stays reachable for diagnostics
-			if !errors.Is(got, c.want) {
-				t.Fatalf("public sentinel lost")
+			if !errors.Is(got, c.in) {
+				t.Fatalf("translate(%v) = %v; the original error is no longer reachable", c.in, got)
 			}
 		})
 	}

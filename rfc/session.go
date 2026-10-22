@@ -48,9 +48,13 @@ func (s *Session) Call(ctx context.Context, functionName string, in Params) (Res
 		return Result{}, ErrClosed
 	}
 	res, err := s.client.callOn(ctx, s.lease.Value(), functionName, in)
-	if err != nil && errors.Is(err, ErrTransport) {
-		// The conversation is broken: drop the connection rather than return a
-		// half-dead session to the pool, and fail subsequent calls fast.
+	// A transport failure breaks the conversation; a server-side deallocation
+	// ends it even when the call returned a result or a clean *ABAPException
+	// (a MESSAGE, short dump, or auth refusal deallocates on the way out).
+	// Either way, drop the connection rather than keep a dead session pinned:
+	// the next Call then fails fast with ErrClosed instead of a misleading
+	// "session is closed" from deep inside the CPIC layer.
+	if (err != nil && errors.Is(err, ErrTransport)) || s.lease.Value().SessionClosed() {
 		s.lease.Discard()
 		s.lease.Release()
 		s.lease = nil

@@ -44,7 +44,10 @@ func (c *Client) DescribeTool(ctx context.Context, functionName string) (ToolSch
 	// a structure or a table type) are described from the RFC_METADATA_GET type
 	// graph instead — a nested structure as a nested object, a nested table as
 	// an array. See recursive.go.
-	plan := c.planLayoutOn(ctx, sess, iface, resolveDef)
+	plan, err := c.planLayoutOn(ctx, sess, iface, resolveDef)
+	if err != nil {
+		return ToolSchema{}, err
+	}
 	resolve := func(name string) map[string]any {
 		def, err := resolveDef(name)
 		if err != nil {

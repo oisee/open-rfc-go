@@ -44,13 +44,20 @@ package rfc
 //     nested structure whose flat RFC_FIELDS happens to validate anyway keeps
 //     its flattened layout.
 //
-//   - If RFC_METADATA_GET is missing or refuses (an old or locked-down
-//     system), the fetch failure is cached and the call falls back to the flat
-//     path, which then reports its own original error. Recursion is an
-//     upgrade, never a new failure mode.
+//   - If RFC_METADATA_GET is missing or refuses *without ending the
+//     conversation* (a clean ABAP exception on an old system), the call falls
+//     back to the flat path, which then reports its own original error —
+//     recursion stays an upgrade, never a new failure mode. But a fetch
+//     failure that broke or deallocated the conversation (a transport error,
+//     or an S_RFC auth MESSAGE that ends the conversation on the way out)
+//     fails the call with an error naming the metadata lookup: encoding on
+//     the dead conversation would only produce a misleading "session is
+//     closed". Failures are never cached — only successful graphs are — so a
+//     transient denial does not poison the function for the client's lifetime.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/oisee/open-rfc-go/internal/classicrfc"
@@ -66,13 +73,6 @@ import (
 // codec enforces its own depth budget; this only keeps schema rendering and
 // input coercion finite on a cyclic graph.
 const maxGraphSchemaDepth = 32
-
-// graphEntry caches one RFC_METADATA_GET outcome, success or failure, so a
-// system without recursive metadata is probed at most once per function.
-type graphEntry struct {
-	graph metadata.Graph
-	err   error
-}
 
 // layoutPlan records, for one function, which parameters cannot be modelled
 // flatly and must travel on the recursive xRFC codec instead. A nil plan means
@@ -116,8 +116,10 @@ func defHasNestedField(def rfctypes.RfcStructureDefinition) bool {
 // every layout-bearing parameter flatly first; only if some parameter's flat
 // layout is unusable — it cannot be decoded, or it declares a nested component
 // — does it fetch the recursive graph, and then only those parameters switch
-// codec. Returns nil when the flat model covers everything.
-func (c *Client) planLayoutOn(ctx context.Context, sess *lifecycle.Managed, iface metadata.RfcFunctionInterface, resolve structResolver) *layoutPlan {
+// codec. Returns a nil plan when the flat model covers everything. A non-nil
+// error means the graph fetch killed or desynced the conversation; the call
+// must fail with it instead of encoding on a dead conversation.
+func (c *Client) planLayoutOn(ctx context.Context, sess *lifecycle.Managed, iface metadata.RfcFunctionInterface, resolve structResolver) (*layoutPlan, error) {
 	var unresolved []classicrfc.FunintParameter
 	for _, p := range iface.Parameters {
 		if !paramHasLayout(p) || p.TableName == "" {
@@ -137,13 +139,21 @@ func (c *Client) planLayoutOn(ctx context.Context, sess *lifecycle.Managed, ifac
 		}
 	}
 	if len(unresolved) == 0 {
-		return nil
+		return nil, nil
 	}
 	graph, err := c.recursiveGraphOn(ctx, sess, iface.Name)
 	if err != nil {
-		// No recursive metadata available — leave the flat path to report the
-		// original resolution failure.
-		return nil
+		// A fetch failure that broke or deallocated the conversation must fail
+		// the call: proceeding would encode on a dead conversation and report
+		// a misleading "session is closed" instead of the real cause (an S_RFC
+		// denial of the lookup, say). Only a conversation that survived — a
+		// clean ABAP exception from an old system without RFC_METADATA_GET —
+		// falls back to the flat path, which then reports its own original
+		// resolution failure.
+		if errors.Is(err, ErrTransport) || (sess != nil && sess.SessionClosed()) {
+			return nil, fmt.Errorf("planning layout for %s: metadata lookup failed: %w", iface.Name, err)
+		}
+		return nil, nil
 	}
 	plan := &layoutPlan{graph: graph, recursive: map[string]xrfc.ResolvedParameter{}}
 	for _, p := range unresolved {
@@ -154,29 +164,34 @@ func (c *Client) planLayoutOn(ctx context.Context, sess *lifecycle.Managed, ifac
 		plan.recursive[p.ParameterName] = rp
 	}
 	if len(plan.recursive) == 0 {
-		return nil
+		return nil, nil
 	}
-	return plan
+	return plan, nil
 }
 
 // recursiveGraphOn returns the normalized RFC_METADATA_GET type graph for one
-// function, cached per client (failures included).
+// function, cached per client. Only successful lookups are cached: a failure
+// is state of this moment — a dropped conversation, a refused S_RFC — not of
+// the function, so the next call probes again on a healthy conversation.
 func (c *Client) recursiveGraphOn(ctx context.Context, sess *lifecycle.Managed, functionName string) (metadata.Graph, error) {
-	if e, ok := c.cachedGraph(functionName); ok {
-		return e.graph, e.err
+	if g, ok := c.cachedGraph(functionName); ok {
+		return g, nil
 	}
 	graph, err := fetchRecursiveGraph(ctx, sess, functionName, c.dest.Language)
+	if err != nil {
+		return metadata.Graph{}, err
+	}
 	c.mu.Lock()
-	c.graphCache[functionName] = graphEntry{graph: graph, err: err}
+	c.graphCache[functionName] = graph
 	c.mu.Unlock()
-	return graph, err
+	return graph, nil
 }
 
-func (c *Client) cachedGraph(name string) (graphEntry, bool) {
+func (c *Client) cachedGraph(name string) (metadata.Graph, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e, ok := c.graphCache[name]
-	return e, ok
+	g, ok := c.graphCache[name]
+	return g, ok
 }
 
 // fetchRecursiveGraph runs RFC_METADATA_GET (DEEP) for one function through the
@@ -195,7 +210,7 @@ func fetchRecursiveGraph(ctx context.Context, sess *lifecycle.Managed, functionN
 	}
 	res, err := sess.CallRaw(ctx, req)
 	if err != nil {
-		return metadata.Graph{}, fmt.Errorf("%w: %v", ErrTransport, err)
+		return metadata.Graph{}, fmt.Errorf("%w: %w", ErrTransport, err)
 	}
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return metadata.Graph{}, exc
@@ -204,6 +219,15 @@ func fetchRecursiveGraph(ctx context.Context, sess *lifecycle.Managed, functionN
 	if err != nil {
 		return metadata.Graph{}, err
 	}
+	return normalizeRecursiveGraph(functionName, output)
+}
+
+// normalizeRecursiveGraph is the single response-to-graph step: it turns one
+// decoded RFC_METADATA_GET output (tables as []map[string]any rows) into the
+// bounded type graph. Live responses (fetchRecursiveGraph) and seeded captures
+// (Client.SeedMetadata) both flow through here, so a seed is validated exactly
+// as a wire response would be.
+func normalizeRecursiveGraph(functionName string, output map[string]any) (metadata.Graph, error) {
 	result, err := metadata.NormalizeRecursiveFunctionResult(functionName, output)
 	if err != nil {
 		return metadata.Graph{}, fmt.Errorf("%w: %v", ErrProtocol, err)

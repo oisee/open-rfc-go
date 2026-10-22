@@ -53,6 +53,7 @@ func (f *fakeSession) CallWithCallbacks(ctx context.Context, request []byte, _ c
 }
 
 func (f *fakeSession) Authenticated() bool { return !f.closed.Load() }
+func (f *fakeSession) Closed() bool        { return f.closed.Load() }
 func (f *fakeSession) Close() error        { f.closed.Store(true); return nil }
 
 func TestSerializesConcurrentCalls(t *testing.T) {
