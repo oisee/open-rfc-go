@@ -7,6 +7,11 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `internal/value`: a packed field of all zero bytes, which has no sign nibble,
+  decodes as zero instead of failing the whole response. It is what a field the
+  ABAP side never initialised looks like, and SAP GUI shows it as 0. The same
+  fix is proposed to open-rfc.
+
 - `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
   reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
   unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards

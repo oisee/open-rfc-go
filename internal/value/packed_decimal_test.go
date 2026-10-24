@@ -14,6 +14,28 @@ import (
 	"testing"
 )
 
+// A packed field the ABAP side never initialised arrives as all zero bytes,
+// with no sign nibble, and decodes as zero. A zero sign nibble after a digit is
+// still refused.
+func TestPackedDecimalAllZeroBytes(t *testing.T) {
+	for _, c := range []struct {
+		hex      string
+		decimals int
+	}{{"00", 0}, {"00000000", 0}, {"0000000000000000", 2}} {
+		got, err := DecodePackedDecimal(mustHexV(t, c.hex), c.decimals, "P")
+		if err != nil {
+			t.Fatalf("%s/%d: %v", c.hex, c.decimals, err)
+		}
+		want, err := DecodePackedDecimal(mustHexV(t, c.hex[:len(c.hex)-1]+"c"), c.decimals, "P")
+		if err != nil || got != want {
+			t.Fatalf("%s/%d = %q, want %q (positive zero)", c.hex, c.decimals, got, want)
+		}
+	}
+	if _, err := DecodePackedDecimal(mustHexV(t, "0010"), 0, "P"); !errors.Is(err, ErrPackedDecode) {
+		t.Fatalf("zero sign nibble after a digit not refused: %v", err)
+	}
+}
+
 func TestPackedDecimalKnownVectors(t *testing.T) {
 	cases := []struct {
 		value      string

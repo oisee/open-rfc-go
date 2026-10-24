@@ -196,6 +196,12 @@ func DecodePackedDecimal(value []byte, decimals int, path string) (string, error
 		return "", fmt.Errorf("%w: %s contains a non-decimal digit nibble", ErrPackedDecode, path)
 	}
 	sign := h[len(h)-1]
+	// A field the ABAP side never initialised is all zero bytes, with no sign
+	// nibble. SAP GUI shows it as 0, so it decodes as positive zero. A zero
+	// sign nibble after any non-zero digit is still refused.
+	if strings.Trim(h, "0") == "" {
+		sign = 'C'
+	}
 	positive := sign == 'A' || sign == 'C' || sign == 'E' || sign == 'F'
 	negative := sign == 'B' || sign == 'D'
 	if !positive && !negative {
