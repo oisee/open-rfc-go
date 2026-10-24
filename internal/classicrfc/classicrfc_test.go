@@ -134,6 +134,35 @@ func tableHeaderBytes(rowLen, rowCount uint32) []byte {
 	return h
 }
 
+// The field count of a result is bounded by cpic.DefaultMaxFieldCount unless
+// the caller configures another limit. The byte limits apply either way.
+func TestDecodeResultFieldCountLimit(t *testing.T) {
+	rows := cpic.DefaultMaxFieldCount + 1
+	fields := []cpic.Field{fld(cpic.TagTableName, u16("ROWS")), fld(cpic.TagTableHeader, tableHeaderBytes(4, uint32(rows)))}
+	for i := 0; i < rows; i++ {
+		fields = append(fields, fld(cpic.TagTableContent, []byte{1, 2, 3, 4}))
+	}
+	fields = append(fields, fld(cpic.TagEnd, nil))
+
+	if _, err := DecodeResult(fields); !errors.Is(err, ErrRange) || !strings.Contains(err.Error(), "field count exceeds") {
+		t.Fatalf("default limit: want a field-count refusal, got %v", err)
+	}
+	r, err := DecodeResultWithLimits(fields, Limits{MaxFieldCount: 2 * cpic.DefaultMaxFieldCount})
+	if err != nil {
+		t.Fatalf("raised limit: %v", err)
+	}
+	if len(r.Tables) != 1 || len(r.Tables[0].Rows) != rows {
+		t.Fatalf("raised limit: got %d tables", len(r.Tables))
+	}
+	small := []cpic.Field{fld(cpic.TagParameterName, u16("A")), fld(cpic.TagParameterValue, u16("x")), fld(cpic.TagEnd, nil)}
+	if _, err := DecodeResultWithLimits(small, Limits{MaxFieldCount: 2}); !errors.Is(err, ErrRange) {
+		t.Fatalf("lowered limit: want ErrRange, got %v", err)
+	}
+	if _, err := DecodeResultWithLimits(small, Limits{}); err != nil {
+		t.Fatalf("zero limits keep the default: %v", err)
+	}
+}
+
 func TestDecodeResultScalarsAndTables(t *testing.T) {
 	fields := []cpic.Field{
 		fld(cpic.TagRequestedOutput, u16("RESULT")),

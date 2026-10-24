@@ -215,9 +215,9 @@ func decodeSimpleCompressedTableRow(v []byte, declaredRowByteLength uint32, tabl
 	return decoded, nil
 }
 
-func preflightResultBytes(fields []cpic.Field) error {
-	if len(fields) > cpic.DefaultMaxFieldCount {
-		return fmt.Errorf("%w: classic RFC result field count exceeds %d", ErrRange, cpic.DefaultMaxFieldCount)
+func preflightResultBytes(fields []cpic.Field, maxFieldCount int) error {
+	if len(fields) > maxFieldCount {
+		return fmt.Errorf("%w: classic RFC result field count exceeds %d", ErrRange, maxFieldCount)
 	}
 	valueBytes := 0
 	for _, f := range fields {
@@ -298,18 +298,34 @@ func preflightTableBytes(fields []cpic.Field) error {
 // DecodeResult groups a decoded function response into lossless scalar/table
 // wire values. Unknown application records are rejected.
 func DecodeResult(fields []cpic.Field) (Result, error) {
-	return decodeResult(fields, false)
+	return decodeResult(fields, false, Limits{})
+}
+
+// Limits bounds DecodeResultWithLimits. A zero field keeps its default.
+type Limits struct {
+	// MaxFieldCount bounds the fields of the result: every table row is one.
+	// The default is cpic.DefaultMaxFieldCount. The byte limits still apply.
+	MaxFieldCount int
+}
+
+// DecodeResultWithLimits is DecodeResult under limits.
+func DecodeResultWithLimits(fields []cpic.Field, limits Limits) (Result, error) {
+	return decodeResult(fields, false, limits)
 }
 
 // DecodeOwnedResult decodes values already owned by the current CPIC session
 // without a second snapshot; returned buffers may alias fields.
 func DecodeOwnedResult(fields []cpic.Field) (Result, error) {
-	return decodeResult(fields, true)
+	return decodeResult(fields, true, Limits{})
 }
 
-func decodeResult(fields []cpic.Field, borrow bool) (Result, error) {
+func decodeResult(fields []cpic.Field, borrow bool, limits Limits) (Result, error) {
 	var zero Result
-	if err := preflightResultBytes(fields); err != nil {
+	maxFieldCount := limits.MaxFieldCount
+	if maxFieldCount == 0 {
+		maxFieldCount = cpic.DefaultMaxFieldCount
+	}
+	if err := preflightResultBytes(fields, maxFieldCount); err != nil {
 		return zero, err
 	}
 	if err := preflightTableBytes(fields); err != nil {

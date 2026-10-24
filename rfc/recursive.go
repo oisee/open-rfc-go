@@ -279,7 +279,7 @@ func decodeMetadataGetResult(fields []cpic.Field) (map[string]any, error) {
 		}
 		rows := make([]map[string]any, 0, len(t.Rows))
 		for i, row := range t.Rows {
-			m, err := decodeFixedRow(def, row)
+			m, err := decodeFixedRow(def, row, DecodeOptions{})
 			if err != nil {
 				return nil, fmt.Errorf("%w: RFC_METADATA_GET %s row %d: %v", ErrProtocol, t.Name, i, err)
 			}

@@ -59,6 +59,10 @@ type SessionOptions struct {
 	ProgramName              string // default "open-rfc"
 	LocalAddress             string // advertised IPv4; default 127.0.0.1
 	OperationTimeout         time.Duration
+	// MaxResponseFieldCount bounds the fields of one function response; every
+	// table row is one. Zero keeps cpic.DefaultMaxFieldCount. The byte limits
+	// still bound memory.
+	MaxResponseFieldCount int
 	// Router, if set, routes the connection through a SAProuter (its final hop
 	// is the target gateway).
 	Router *saprouter.Route
@@ -94,6 +98,7 @@ type Session struct {
 	authenticated   bool
 	closed          bool
 	opTimeout       time.Duration
+	responseLimits  cpic.ResponseLimits
 }
 
 func p8(v uint8) *uint8 { return &v }
@@ -138,6 +143,9 @@ func Open(ctx context.Context, opts SessionOptions) (*Session, error) {
 	if !servicePattern.MatchString(opts.ApplicationServerService) {
 		return nil, fmt.Errorf("%w: applicationServerService must use the form sapdpNN", ErrSession)
 	}
+	if opts.MaxResponseFieldCount < 0 {
+		return nil, fmt.Errorf("%w: maxResponseFieldCount must be a non-negative integer", ErrSession)
+	}
 	localAddress := opts.LocalAddress
 	if localAddress == "" {
 		localAddress = "127.0.0.1"
@@ -168,7 +176,8 @@ func Open(ctx context.Context, opts SessionOptions) (*Session, error) {
 		tr = dialed
 	}
 
-	s := &Session{transport: tr, localAddress: localAddress, destination: destination, programName: programName, opTimeout: opTimeout, service: opts.ApplicationServerService}
+	s := &Session{transport: tr, localAddress: localAddress, destination: destination, programName: programName, opTimeout: opTimeout, service: opts.ApplicationServerService,
+		responseLimits: cpic.ResponseLimits{MaxFieldCount: opts.MaxResponseFieldCount}}
 	if err := s.handshake(ctx); err != nil {
 		_ = tr.Close()
 		return nil, err
@@ -538,7 +547,7 @@ func (s *Session) Call(ctx context.Context, functionName string, imports []cpic.
 	if err != nil {
 		return CallResult{}, err
 	}
-	decoded, err := cpic.DecodeFunctionResultFields(response)
+	decoded, err := cpic.DecodeFunctionResultFieldsWithLimits(response, s.responseLimits)
 	if err != nil {
 		return CallResult{}, err
 	}
@@ -594,7 +603,7 @@ func (s *Session) CallWithCallbacks(ctx context.Context, request []byte, onCallb
 			}
 			continue
 		}
-		decoded, err := cpic.DecodeFunctionResultFields(data)
+		decoded, err := cpic.DecodeFunctionResultFieldsWithLimits(data, s.responseLimits)
 		if err != nil {
 			return CallResult{}, err
 		}

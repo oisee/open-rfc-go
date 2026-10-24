@@ -307,7 +307,24 @@ func EncodeCutFunctionRequest(input CutFunctionRequestInput) ([]byte, error) {
 	return concat(cpicCutFunctionRequestPrefix, chain, trailer), nil
 }
 
-func decodeFunctionResponseEnvelope(data []byte, additionalAllowedTags []uint16) (DecodedFunctionResultFields, error) {
+// ResponseLimits bounds the decode of one function response. A zero field
+// keeps its default.
+type ResponseLimits struct {
+	// MaxFieldCount bounds the fields of the response: every table row is one.
+	// The default is DefaultMaxFieldCount. The byte limits still bound memory.
+	MaxFieldCount int
+}
+
+// maxFieldCount is the limit as FieldChainLimits and rfcerr take it: nil for
+// the default, and a negative value is passed on to be refused there.
+func (l ResponseLimits) maxFieldCount() *int {
+	if l.MaxFieldCount == 0 {
+		return nil
+	}
+	return intptr(l.MaxFieldCount)
+}
+
+func decodeFunctionResponseEnvelope(data []byte, additionalAllowedTags []uint16, limits ResponseLimits) (DecodedFunctionResultFields, error) {
 	var zero DecodedFunctionResultFields
 	if len(data) < len(cpicFunctionResponsePrefix)+8 {
 		return zero, fmt.Errorf("%w: CPIC function response is truncated", ErrRange)
@@ -315,7 +332,7 @@ func decodeFunctionResponseEnvelope(data []byte, additionalAllowedTags []uint16)
 	if !bytes.Equal(data[0:len(cpicFunctionResponsePrefix)], cpicFunctionResponsePrefix) {
 		return zero, fmt.Errorf("%w: CPIC function response prefix is invalid", ErrProtocol)
 	}
-	decoded, err := DecodeFieldChainPrefix(data[len(cpicFunctionResponsePrefix):], uint16(TagResponseStart), uint16(TagEnd), FieldChainLimits{})
+	decoded, err := DecodeFieldChainPrefix(data[len(cpicFunctionResponsePrefix):], uint16(TagResponseStart), uint16(TagEnd), FieldChainLimits{MaxFieldCount: limits.maxFieldCount()})
 	if err != nil {
 		return zero, err
 	}
@@ -326,14 +343,18 @@ func decodeFunctionResponseEnvelope(data []byte, additionalAllowedTags []uint16)
 	if binary.BigEndian.Uint16(data[trailerOffset:]) != uint16(TagEnd) {
 		return zero, fmt.Errorf("%w: CPIC function response trailer is invalid", ErrProtocol)
 	}
-	return decodeFunctionResponseFields(decoded.Fields, additionalAllowedTags)
+	return decodeFunctionResponseFields(decoded.Fields, additionalAllowedTags, limits)
 }
 
-func decodeFunctionResponseFields(fields []Field, additionalAllowedTags []uint16) (DecodedFunctionResultFields, error) {
+func decodeFunctionResponseFields(fields []Field, additionalAllowedTags []uint16, limits ResponseLimits) (DecodedFunctionResultFields, error) {
 	var zero DecodedFunctionResultFields
 	allowed := append([]uint16{uint16(TagProgram), 0x0667}, additionalAllowedTags...)
+	maxFieldCount := limits.maxFieldCount()
+	if maxFieldCount == nil {
+		maxFieldCount = intptr(DefaultMaxFieldCount)
+	}
 	envelope, err := rfcerr.Decode(toRfcErrFields(fields), rfcerr.DecodeOptions{
-		MaxFieldCount:         intptr(DefaultMaxFieldCount),
+		MaxFieldCount:         maxFieldCount,
 		AdditionalAllowedTags: allowed,
 	})
 	if err != nil {
@@ -358,6 +379,12 @@ func decodeFunctionResponseFields(fields []Field, additionalAllowedTags []uint16
 // DecodeFunctionResultFields decodes application fields for the value-codec
 // layer. Keep these values out of logs.
 func DecodeFunctionResultFields(data []byte) (DecodedFunctionResultFields, error) {
+	return DecodeFunctionResultFieldsWithLimits(data, ResponseLimits{})
+}
+
+// DecodeFunctionResultFieldsWithLimits is DecodeFunctionResultFields under
+// limits.
+func DecodeFunctionResultFieldsWithLimits(data []byte, limits ResponseLimits) (DecodedFunctionResultFields, error) {
 	// s4ClassicExtensionTags are S/4HANA classic-serialization extension tags
 	// observed live and beyond upstream open-rfc's scope (classic non-S4): 0x0104
 	// accompanies scalar/structure exports, and the 0x033x family carries S4 table
@@ -373,13 +400,13 @@ func DecodeFunctionResultFields(data []byte) (DecodedFunctionResultFields, error
 	// are beyond upstream open-rfc's scope (classic non-S4) — an open-rfc-go
 	// extension — and are tolerated here so an S/4 classic response's envelope
 	// classifies instead of being rejected as an unknown tag.
-	return decodeFunctionResponseEnvelope(data, s4ClassicExtensionTags)
+	return decodeFunctionResponseEnvelope(data, s4ClassicExtensionTags, limits)
 }
 
 // DecodeResetServerContextResultFields decodes the reply to
 // SYSTEM_RESET_RFC_SERVER.
 func DecodeResetServerContextResultFields(data []byte) (DecodedFunctionResultFields, error) {
-	decoded, err := decodeFunctionResponseEnvelope(data, []uint16{uint16(TagRfcServerResetDn)})
+	decoded, err := decodeFunctionResponseEnvelope(data, []uint16{uint16(TagRfcServerResetDn)}, ResponseLimits{})
 	if err != nil {
 		return DecodedFunctionResultFields{}, err
 	}
@@ -466,13 +493,13 @@ func DecodeSessionRefreshResultFields(data []byte) (DecodedFunctionResultFields,
 			break
 		}
 	}
-	return decodeFunctionResponseFields(decoded.Fields[responseStartIndex+1:], nil)
+	return decodeFunctionResponseFields(decoded.Fields[responseStartIndex+1:], nil, ResponseLimits{})
 }
 
 // DecodeFunctionResponse decodes structural outcome and status from a regular
 // Unicode RFC response.
 func DecodeFunctionResponse(data []byte) (DecodedFunctionResponse, error) {
-	decoded, err := decodeFunctionResponseEnvelope(data, []uint16{uint16(TagXRfcParameter), uint16(TagXRfcData)})
+	decoded, err := decodeFunctionResponseEnvelope(data, []uint16{uint16(TagXRfcParameter), uint16(TagXRfcData)}, ResponseLimits{})
 	if err != nil {
 		return DecodedFunctionResponse{}, err
 	}

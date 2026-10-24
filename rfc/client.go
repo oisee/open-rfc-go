@@ -35,6 +35,25 @@ type PoolConfig struct {
 	AcquireTimeout time.Duration
 }
 
+// MaxResponseFieldCountLimit is the highest DecodeOptions.MaxResponseFieldCount
+// a Destination accepts.
+const MaxResponseFieldCountLimit = 10_000_000
+
+// DecodeOptions relaxes how the results of Client.Call are read. The zero value
+// keeps the strict defaults. Encoding is never relaxed.
+type DecodeOptions struct {
+	// LenientTemporal returns a DATS or TIMS value in a structure or table row
+	// that is not YYYYMMDD or HHMMSS as its raw text, instead of failing the
+	// call. Tables written by older programs or copied from other systems hold
+	// such values, and one of them would otherwise fail the whole result.
+	LenientTemporal bool
+	// MaxResponseFieldCount bounds the fields of one response, where every
+	// table row is one, and the rows and cells of one xRFC parameter. Zero
+	// keeps the default of 100,000, which a monitoring table can exceed. At
+	// most MaxResponseFieldCountLimit. The byte limits still bound memory.
+	MaxResponseFieldCount int
+}
+
 // Destination describes how to reach and log on to a system.
 type Destination struct {
 	Host     string // gateway host
@@ -57,6 +76,8 @@ type Destination struct {
 	// CALL FUNCTION … DESTINATION 'BACK') by function-module name. Leave nil if
 	// the destination is never expected to call back.
 	Callbacks map[string]CallbackFunc
+	// Decode relaxes how call results are read. The zero value is strict.
+	Decode DecodeOptions
 }
 
 // Client is a pooled, authenticated connection to one Destination. It is safe
@@ -79,6 +100,9 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 	if d.Host == "" || d.User == "" {
 		return nil, fmt.Errorf("%w: Host and User are required", ErrProtocol)
 	}
+	if n := d.Decode.MaxResponseFieldCount; n < 0 || n > MaxResponseFieldCountLimit {
+		return nil, fmt.Errorf("%w: Decode.MaxResponseFieldCount must be in 0..%d", ErrProtocol, MaxResponseFieldCountLimit)
+	}
 	openSession := func(ctx context.Context) (*lifecycle.Managed, error) {
 		sopts := client.SessionOptions{
 			Host:                     d.Host,
@@ -86,6 +110,7 @@ func Open(ctx context.Context, d Destination) (*Client, error) {
 			ApplicationServerService: d.Service,
 			ProgramName:              d.ProgramName,
 			OperationTimeout:         d.OperationTimeout,
+			MaxResponseFieldCount:    d.Decode.MaxResponseFieldCount,
 		}
 		if d.Router != "" {
 			route, err := saprouter.CompleteRoute(d.Router, d.Host, d.Port)

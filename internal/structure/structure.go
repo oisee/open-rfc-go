@@ -392,7 +392,7 @@ func writeValue(target []byte, def rfctypes.RfcStructureDefinition, field rfctyp
 	return nil
 }
 
-func readValue(source []byte, def rfctypes.RfcStructureDefinition, field rfctypes.RfcStructureField) (any, error) {
+func readValue(source []byte, def rfctypes.RfcStructureDefinition, field rfctypes.RfcStructureField, opts DecodeOptions) (any, error) {
 	path := fieldPath(def, field)
 	seg := source[field.Offset : field.Offset+field.InternalLength]
 	if value.IsClassicTemporalExid(field.Exid) {
@@ -411,14 +411,22 @@ func readValue(source []byte, def rfctypes.RfcStructureDefinition, field rfctype
 		if err != nil {
 			return nil, err
 		}
-		return value.ClassicDatePublicText(decoded, path)
+		text, err := value.ClassicDatePublicText(decoded, path)
+		if err != nil && opts.LenientTemporal {
+			return decoded, nil
+		}
+		return text, err
 	case "T":
 		chars, _ := characterLength(field, path)
 		decoded, err := classicrfc.DecodeAbapFixedChar(seg, chars)
 		if err != nil {
 			return nil, err
 		}
-		return value.ClassicTimePublicText(decoded, path)
+		text, err := value.ClassicTimePublicText(decoded, path)
+		if err != nil && opts.LenientTemporal {
+			return decoded, nil
+		}
+		return text, err
 	case "X":
 		return append([]byte(nil), seg...), nil
 	case "F":
@@ -498,8 +506,22 @@ func Encode(def rfctypes.RfcStructureDefinition, input map[string]any) ([]byte, 
 	return result, nil
 }
 
+// DecodeOptions relaxes Decode. The zero value is strict.
+type DecodeOptions struct {
+	// LenientTemporal returns a DATS or TIMS value that is not YYYYMMDD or
+	// HHMMSS as its raw text instead of failing. Tables written by older
+	// programs or copied from other systems hold such values, and one of them
+	// would otherwise fail the whole result. Encode stays strict.
+	LenientTemporal bool
+}
+
 // Decode decodes one fixed-layout classic Unicode structure into plain values.
 func Decode(def rfctypes.RfcStructureDefinition, value_ []byte) (map[string]any, error) {
+	return DecodeWithOptions(def, value_, DecodeOptions{})
+}
+
+// DecodeWithOptions is Decode with opts.
+func DecodeWithOptions(def rfctypes.RfcStructureDefinition, value_ []byte, opts DecodeOptions) (map[string]any, error) {
 	normalized, err := ValidateCodec(def, "")
 	if err != nil {
 		return nil, err
@@ -513,7 +535,7 @@ func Decode(def rfctypes.RfcStructureDefinition, value_ []byte) (map[string]any,
 	source := append([]byte(nil), value_...)
 	result := make(map[string]any, len(normalized.Fields))
 	for _, field := range normalized.Fields {
-		v, err := readValue(source, normalized, field)
+		v, err := readValue(source, normalized, field, opts)
 		if err != nil {
 			return nil, err
 		}

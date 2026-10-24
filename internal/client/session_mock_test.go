@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/oisee/open-rfc-go/internal/appc"
@@ -140,6 +141,56 @@ func TestSessionHandshakeAndLogonOverMock(t *testing.T) {
 	// Logon sent one more record (the F_SAP_SEND carrying the CPIC logon request).
 	if len(mock.sent) != 5 {
 		t.Fatalf("after logon sent %d records, want 5", len(mock.sent))
+	}
+}
+
+// A function response is decoded under the session's MaxResponseFieldCount.
+func TestSessionCallHonoursMaxResponseFieldCount(t *testing.T) {
+	convID := []byte("CONV0001")
+	connIndex := uint16(7)
+	chain, err := cpic.EncodeFieldChain(uint16(cpic.TagResponseStart), []cpic.Field{
+		{Tag: uint16(cpic.TagResponseContext)},
+		{Tag: uint16(cpic.TagUnresolved0420), Value: make([]byte, 4)},
+		{Tag: uint16(cpic.TagCallContext)},
+		{Tag: uint16(cpic.TagEnd)},
+	}, cpic.FieldChainLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := append(append(mustHex(t, "05000000"), chain...), 0xff, 0xff)
+	request, err := cpic.EncodeCutFunctionRequest(cpic.CutFunctionRequestInput{FunctionName: "RFC_PING"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		limit int
+		ok    bool
+	}{{0, true}, {4, true}, {3, false}} {
+		replies := handshakeReplies(t, convID, connIndex)
+		replies = append(replies,
+			incomingDataRecord(convID, connIndex, appc.VectorEndOfMessage|0x08, logonSuccessCPIC(t)),
+			incomingDataRecord(convID, connIndex, appc.VectorEndOfMessage|0x08, response))
+		ctx := context.Background()
+		sess, err := Open(ctx, SessionOptions{Host: "mock", Port: 3200, ApplicationServerService: "sapdp00",
+			Transport: &mockTransport{replies: replies}, MaxResponseFieldCount: c.limit})
+		if err != nil {
+			t.Fatalf("limit %d: open: %v", c.limit, err)
+		}
+		if err := sess.LogonAndPing(ctx, LogonOptions{Client: "001", User: "TESTER", Password: "secret"}); err != nil {
+			t.Fatalf("limit %d: logon: %v", c.limit, err)
+		}
+		_, err = sess.CallRaw(ctx, request)
+		if c.ok && err != nil {
+			t.Fatalf("limit %d: %v", c.limit, err)
+		}
+		if !c.ok && (err == nil || !strings.Contains(err.Error(), "field count exceeds")) {
+			t.Fatalf("limit %d: want a field-count refusal, got %v", c.limit, err)
+		}
+	}
+	if _, err := Open(context.Background(), SessionOptions{Host: "mock", Port: 3200, ApplicationServerService: "sapdp00",
+		Transport: &mockTransport{}, MaxResponseFieldCount: -1}); err == nil {
+		t.Fatal("a negative MaxResponseFieldCount was accepted")
 	}
 }
 

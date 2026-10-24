@@ -7,6 +7,13 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `rfc`: `Destination.Decode` (`DecodeOptions`) relaxes how call results are
+  read, strict by default. `LenientTemporal` keeps a DATS or TIMS value that is
+  not YYYYMMDD or HHMMSS as raw text instead of failing the call.
+  `MaxResponseFieldCount` raises (or lowers) the field limit of one response,
+  100,000 by default, and with it the xRFC row and cell limits, up to
+  `MaxResponseFieldCountLimit`. The byte limits are unchanged.
+
 - `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
   reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
   unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards

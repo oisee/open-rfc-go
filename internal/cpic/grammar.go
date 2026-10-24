@@ -167,7 +167,7 @@ func decodeRichInitialRfcPingResponse(fields []Field, structural []StructuralFie
 	if binary.BigEndian.Uint32(callStatuses[0].Value) != 0 {
 		return zero, failStructure("nonzero-call-status", "initial CPIC RFCPING composite response has nonzero call status", structural)
 	}
-	embedded, err := decodeFunctionResponseFields(fields[match.preambleFieldCount+1:], match.embeddedAllowedTags)
+	embedded, err := decodeFunctionResponseFields(fields[match.preambleFieldCount+1:], match.embeddedAllowedTags, ResponseLimits{})
 	if err != nil {
 		return zero, err
 	}

@@ -39,6 +39,13 @@ const (
 	absoluteRuntimeMaxNodes = 1_000_000
 )
 
+// DefaultRuntimeMaxNodes and AbsoluteRuntimeMaxNodes are the default and the
+// ceiling of RecursiveLimits.MaxNodes.
+const (
+	DefaultRuntimeMaxNodes  = defaultRuntimeMaxNodes
+	AbsoluteRuntimeMaxNodes = absoluteRuntimeMaxNodes
+)
+
 var supportedRecursiveScalarTypes = map[string]bool{
 	"C": true, "N": true, "D": true, "T": true, "X": true, "P": true, "F": true,
 	"I": true, "b": true, "s": true, "8": true, "a": true, "e": true,

@@ -109,7 +109,7 @@ func (c *Client) callOn(ctx context.Context, sess *lifecycle.Managed, functionNa
 	if exc := exceptionFromEnvelope(res.Envelope); exc != nil {
 		return Result{}, exc
 	}
-	return decodeResult(iface, res.Fields, resolve, plan)
+	return decodeResult(iface, res.Fields, resolve, plan, c.dest.Decode)
 }
 
 func indexParams(iface metadata.RfcFunctionInterface) map[string]classicrfc.FunintParameter {
@@ -340,8 +340,8 @@ func scalarFieldDef(p classicrfc.FunintParameter, byteLen int) rfctypes.RfcStruc
 	}
 }
 
-func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, resolve structResolver, plan *layoutPlan) (Result, error) {
-	classic, err := classicrfc.DecodeResult(fields)
+func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, resolve structResolver, plan *layoutPlan, opts DecodeOptions) (Result, error) {
+	classic, err := classicrfc.DecodeResultWithLimits(fields, classicrfc.Limits{MaxFieldCount: opts.MaxResponseFieldCount})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrProtocol, err)
 	}
@@ -359,7 +359,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 			if err != nil {
 				return Result{}, err
 			}
-			m, err := decodeFixedRow(def, sc.Value)
+			m, err := decodeFixedRow(def, sc.Value, opts)
 			if err != nil {
 				return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, sc.Name, err)
 			}
@@ -382,7 +382,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 				return Result{}, err
 			}
 			for i, row := range t.Rows {
-				m, err := decodeFixedRow(def, row)
+				m, err := decodeFixedRow(def, row, opts)
 				if err != nil {
 					return Result{}, fmt.Errorf("%w: %s row %d: %v", ErrProtocol, t.Name, i, err)
 				}
@@ -395,8 +395,9 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 	// Surface xRFC XML parameters (STRING/XSTRING-bearing structures and tables).
 	// The parameter name lives inside the XML, so recover it, then decode against
 	// the interface's layout for that parameter.
+	classicLimits, recursiveLimits := xrfcLimits(opts)
 	for _, x := range classic.XrfcParameters {
-		name, err := xrfc.DecodeParameterName(x.Value, xrfc.Limits{})
+		name, err := xrfc.DecodeParameterName(x.Value, classicLimits)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: xRFC parameter name: %v", ErrProtocol, err)
 		}
@@ -405,7 +406,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 			continue
 		}
 		if rp, ok := plan.lookup(name); ok {
-			v, err := xrfc.DecodeRecursiveParameter(p, plan.graph, x.Value, xrfc.RecursiveLimits{})
+			v, err := xrfc.DecodeRecursiveParameter(p, plan.graph, x.Value, recursiveLimits)
 			if err != nil {
 				return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, name, err)
 			}
@@ -425,7 +426,7 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 		if p.ParameterClass == "T" || isTableExid(p.Exid) {
 			kind = xrfc.KindTable
 		}
-		v, err := xrfc.DecodeParameter(name, def, kind, x.Value, xrfc.Limits{})
+		v, err := xrfc.DecodeParameter(name, def, kind, x.Value, classicLimits)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %s: %v", ErrProtocol, name, err)
 		}
@@ -446,8 +447,25 @@ func decodeResult(iface metadata.RfcFunctionInterface, fields []cpic.Field, reso
 // and 462 on the wire, the 2-byte tail being pure alignment. The fill is
 // restored only when every declared field is already covered, so a genuinely
 // truncated value still fails the codec's length check.
-func decodeFixedRow(def rfctypes.RfcStructureDefinition, value []byte) (map[string]any, error) {
-	return structure.Decode(def, padTrailingFill(def, value))
+func decodeFixedRow(def rfctypes.RfcStructureDefinition, value []byte, opts DecodeOptions) (map[string]any, error) {
+	return structure.DecodeWithOptions(def, padTrailingFill(def, value), structure.DecodeOptions{LenientTemporal: opts.LenientTemporal})
+}
+
+// xrfcLimits carries DecodeOptions.MaxResponseFieldCount to the xRFC decoders
+// as their row and cell limits. A recursive parameter's node limit is raised
+// with it, up to the decoder's ceiling, but never lowered: nodes are not
+// fields. Zero keeps the decoders' defaults.
+func xrfcLimits(opts DecodeOptions) (xrfc.Limits, xrfc.RecursiveLimits) {
+	n := opts.MaxResponseFieldCount
+	if n == 0 {
+		return xrfc.Limits{}, xrfc.RecursiveLimits{}
+	}
+	recursive := xrfc.RecursiveLimits{MaxRows: &n, MaxCells: &n}
+	if n > xrfc.DefaultRuntimeMaxNodes {
+		nodes := min(n, xrfc.AbsoluteRuntimeMaxNodes)
+		recursive.MaxNodes = &nodes
+	}
+	return xrfc.Limits{MaxRows: &n}, recursive
 }
 
 func padTrailingFill(def rfctypes.RfcStructureDefinition, value []byte) []byte {
