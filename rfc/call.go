@@ -312,6 +312,15 @@ func encodeScalar(p classicrfc.FunintParameter, val any) ([]byte, error) {
 		// DATE(D)/TIME(T)/packed DEC(P, incl. TIMESTAMP)/FLOAT(F)/INT1,2,8/
 		// DECF16,34/UTCLONG(p): reuse the per-field structure codec via a
 		// single-field layout. The value types match those used inside structures.
+		// DATS and TIMS are 8 and 6 characters whatever RFC_FUNINT reports: some
+		// systems give their length in characters (8, 6), as for CHAR, others in
+		// Unicode bytes (16, 12). open-rfc encodes the fixed width too.
+		switch p.Exid {
+		case "D":
+			n = 16
+		case "T":
+			n = 12
+		}
 		b, err := structure.Encode(scalarFieldDef(p, n), map[string]any{"V": val})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s scalar type %s: %v", ErrProtocol, p.ParameterName, p.Exid, err)

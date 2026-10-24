@@ -7,6 +7,10 @@ against the live A4H test system (SAP_BASIS 793). Detailed wire findings live in
 
 ## Unreleased
 
+- `rfc`: a DATS or TIMS scalar import is encoded at its fixed width, 16 or 12
+  Unicode bytes, as open-rfc does. A system that reports the RFC_FUNINT length
+  in characters (8, 6) failed the call with "DATE must occupy 16 Unicode bytes".
+
 - `cmd/adt-rfc-bridge`: a stock Eclipse "Custom Application Server" project
   reaches an HTTP backend over RFC. It terminates the RFC/CPIC conversation,
   unwraps the ADT HTTP request tunnelled in `SADT_REST_RFC_ENDPOINT`, forwards

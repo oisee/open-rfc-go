@@ -37,3 +37,35 @@ func TestScalarTypeDelegation(t *testing.T) {
 		})
 	}
 }
+
+// TestScalarTemporalWidth covers DATS and TIMS scalars whose RFC_FUNINT length
+// is given in characters (8, 6), as for CHAR, instead of in bytes (16, 12).
+// Both forms are 8 or 6 characters on the wire, as open-rfc encodes them.
+func TestScalarTemporalWidth(t *testing.T) {
+	cases := []struct {
+		name string
+		p    classicrfc.FunintParameter
+		in   string
+		size int
+	}{
+		{"DATS 8", classicrfc.FunintParameter{ParameterName: "D", Exid: "D", InternalLength: 8}, "20260820", 16},
+		{"DATS 16", classicrfc.FunintParameter{ParameterName: "D", Exid: "D", InternalLength: 16}, "20260820", 16},
+		{"TIMS 6", classicrfc.FunintParameter{ParameterName: "T", Exid: "T", InternalLength: 6}, "235959", 12},
+		{"TIMS 12", classicrfc.FunintParameter{ParameterName: "T", Exid: "T", InternalLength: 12}, "235959", 12},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, err := encodeScalar(c.p, c.in)
+			if err != nil {
+				t.Fatalf("encodeScalar: %v", err)
+			}
+			if len(b) != c.size {
+				t.Fatalf("encoded %d bytes, want %d", len(b), c.size)
+			}
+			got, err := decodeScalar(c.p, b)
+			if err != nil || got != c.in {
+				t.Fatalf("decodeScalar = %#v, %v; want %q", got, err, c.in)
+			}
+		})
+	}
+}
