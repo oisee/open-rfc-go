@@ -7,8 +7,14 @@
 // initial logon wrapped in an APPC data message, then request/response
 // exchanges. Go expresses the same sequence with a blocking transport and
 // context; the elaborate RfcFailure taxonomy collapses to wrapped errors. This
-// is the flat-call path (compact CPIC packets) that reaches a live
-// STFC_CONNECTION; streaming, pooling, and SAProuter are milestone 6. See
+// reaches a live STFC_CONNECTION over the flat-call path (compact CPIC
+// packets); pooling and SAProuter shipped in milestone 6. CpicStreaming
+// (opt-in; see SessionOptions) admits internal/appc's already-planned
+// F_ASEND_DATA/F_SEND_DATA/F_RECEIVE sequence for outgoing messages past the
+// compact 28000-byte slice — internal/appc.PlanOutgoingDataFragments and
+// writeDataPlan below already execute the full multi-fragment sequence
+// including the periodic sync barrier acknowledgement; only the option to
+// request it was missing. It stays off by default, as in open-rfc. See
 // docs/provenance.md.
 
 // Package client drives a direct classic-RFC CPIC session to first login and call.
@@ -67,6 +73,10 @@ type SessionOptions struct {
 	Proxy transport.ContextDialer
 	// Transport, if set, is used instead of dialing Host:Port (for tests).
 	Transport Transport
+	// CpicStreaming admits F_ASEND_DATA/F_RECEIVE streaming for an outgoing
+	// message whose application data exceeds the compact 28000-byte F_SAP_SEND
+	// slice, instead of failing it outright. See sendData.
+	CpicStreaming bool
 }
 
 // LogonOptions carries the initial CPIC logon credentials.
@@ -94,6 +104,7 @@ type Session struct {
 	authenticated   bool
 	closed          bool
 	opTimeout       time.Duration
+	cpicStreaming   bool
 }
 
 func p8(v uint8) *uint8 { return &v }
@@ -168,7 +179,7 @@ func Open(ctx context.Context, opts SessionOptions) (*Session, error) {
 		tr = dialed
 	}
 
-	s := &Session{transport: tr, localAddress: localAddress, destination: destination, programName: programName, opTimeout: opTimeout, service: opts.ApplicationServerService}
+	s := &Session{transport: tr, localAddress: localAddress, destination: destination, programName: programName, opTimeout: opTimeout, service: opts.ApplicationServerService, cpicStreaming: opts.CpicStreaming}
 	if err := s.handshake(ctx); err != nil {
 		_ = tr.Close()
 		return nil, err
@@ -413,13 +424,17 @@ func (s *Session) sendData(ctx context.Context, appData, finalSap []byte) (bool,
 	if s.closed {
 		return false, fmt.Errorf("%w: session is closed", ErrSession)
 	}
+	streaming := appc.StreamingDisabled
+	if s.cpicStreaming {
+		streaming = appc.StreamingEnabled
+	}
 	plan, err := appc.PlanOutgoingDataFragments(appc.OutgoingDataPlanInput{
 		RecordHeaderInput:  appc.RecordHeaderInput{ConversationID: s.conversationID},
 		ApplicationData:    appData,
 		FinalSapParameters: finalSap,
 		CommunicationIndex: 0xffff,
 		ConnectionIndex:    s.connectionIndex,
-	}, appc.OutgoingDataPlannerOptions{CpicStreaming: appc.StreamingDisabled})
+	}, appc.OutgoingDataPlannerOptions{CpicStreaming: streaming})
 	if err != nil {
 		return false, err
 	}
