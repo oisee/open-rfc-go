@@ -307,8 +307,22 @@ func EncodeCutFunctionRequest(input CutFunctionRequestInput) ([]byte, error) {
 	return concat(cpicCutFunctionRequestPrefix, chain, trailer), nil
 }
 
+// skipKernel916Lead drops the one field that an ABAP kernel 9.16 sends before the
+// response start of a function response: tag 0x0527, length 4, four bytes, tag 0x0527.
+func skipKernel916Lead(data []byte) []byte {
+	const leadLength = 10
+	if len(data) >= leadLength &&
+		binary.BigEndian.Uint16(data[0:2]) == 0x0527 &&
+		binary.BigEndian.Uint16(data[2:4]) == 4 &&
+		binary.BigEndian.Uint16(data[8:10]) == 0x0527 {
+		return data[leadLength:]
+	}
+	return data
+}
+
 func decodeFunctionResponseEnvelope(data []byte, additionalAllowedTags []uint16) (DecodedFunctionResultFields, error) {
 	var zero DecodedFunctionResultFields
+	data = skipKernel916Lead(data)
 	if len(data) < len(cpicFunctionResponsePrefix)+8 {
 		return zero, fmt.Errorf("%w: CPIC function response is truncated", ErrRange)
 	}
