@@ -38,6 +38,8 @@ var initialRichPreambleGrammar = []grammarCoordinate{
 	exact(uint16(TagSystemCodePage), 8, false),
 	exact(initialCpicUnresolved0450, 6, true),
 	exact(0x0451, 20, true),
+	// Kernel 9.16 sends an 18-character ID here.
+	exact(0x0454, 36, true),
 	exact(0x0452, 4, true),
 	bounded(0x0453, true),
 	bounded(uint16(TagClientAddress), false),
@@ -53,6 +55,8 @@ var initialRichPreambleGrammar = []grammarCoordinate{
 	exact(0x0150, 24, false),
 	exact(0x0151, 6, false),
 	exact(0x0152, 2, false),
+	// Kernel 9.16 sends a 4-byte field just before the response starts.
+	exact(0x0527, 4, true),
 }
 
 var initialRichResponseGrammar = []grammarCoordinate{
